@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Herman Prompt Admin • Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+        
+        :root {
+            --primary-blue: #00AEEF;
+        }
+        
+        * {
+            transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+            transition-duration: 150ms;
+        }
+        
+        .tail-container * {
+            font-family: 'Inter', system_ui, sans-serif;
+        }
+        
+        .logo-font {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+        
+        .app-shell {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .sidebar {
+            width: 260px;
+        }
+        
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            color: #64748B;
+            font-weight: 500;
+            border-radius: 8px;
+            margin: 4px 12px;
+        }
+        
+        .nav-link:hover {
+            background-color: #F1F5F9;
+            color: #0F172A;
+        }
+        
+        .nav-link.active {
+            background-color: #E0F2FE;
+            color: #00AEEF;
+            font-weight: 600;
+        }
+        
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            background: #F8FAFC;
+        }
+        
+        .page {
+            display: none;
+        }
+        
+        .page.active {
+            display: block;
+        }
+        
+        .table-header {
+            background: #F1F5F9;
+        }
+        
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        
+        .wizard-step {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+    </style>
+</head>
+<body class="tail-container">
+    <!-- APP SHELL -->
+    <div class="app-shell bg-white">
+        
+        <!-- TOP BAR -->
+        <div class="h-20 border-b flex items-center px-6 bg-white shadow-sm z-50">
+
+            <!-- Logo -->
+            <div class="flex items-center gap-3">
+                <img src="assets/AI_confident_logo.png" alt="HermanScience logo" class="h-12 w-auto object-contain">
+            </div>
+
+            <!-- Tagline -->
+            <div class="ml-4 text-xs font-medium text-[#64748B] hidden md:block">
+                CREATING AI-CONFIDENT WORKFORCES
+            </div>
+            
+            <div class="flex-1"></div>
+            
+            <!-- Scope / Tenant Switcher -->
+            <div class="flex items-center gap-2 bg-slate-100 rounded-3xl px-4 py-1 text-sm font-medium cursor-pointer hover:bg-slate-200">
+                <i class="fa-solid fa-building"></i>
+                <span id="current-scope">Acme Corp (All Tenants)</span>
+                <i class="fa-solid fa-chevron-down text-xs"></i>
+            </div>
+            
+            <!-- Notifications -->
+            <div class="ml-6 relative cursor-pointer">
+                <i class="fa-solid fa-bell text-xl text-slate-600"></i>
+                <span class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full h-4 w-4 flex items-center justify-center">3</span>
+            </div>
+            
+            <!-- User Menu -->
+            <div class="ml-8 flex items-center gap-3 cursor-pointer">
+                <div class="text-right">
+                    <div class="text-sm font-semibold">Michael Anderson</div>
+                    <div class="text-xs text-emerald-600">Super Admin • HermanScience</div>
+                </div>
+                <div class="w-9 h-9 bg-[#00AEEF] text-white rounded-2xl flex items-center justify-center font-semibold">MA</div>
+            </div>
+        </div>
+        
+        <div class="flex flex-1 overflow-hidden">
+            
+            <!-- LEFT NAVIGATION (matches wireframes) -->
+            <div class="sidebar bg-white border-r flex flex-col py-6">
+                <nav class="flex-1">
+                    <a onclick="navigateTo('dashboard')" class="nav-link active" id="nav-dashboard">
+                        <i class="fa-solid fa-gauge-high w-5"></i>
+                        <span>Dashboard</span>
+                    </a>
+                    <a onclick="navigateTo('activation')" class="nav-link" id="nav-activation">
+                        <i class="fa-solid fa-rocket w-5"></i>
+                        <span>Activation</span>
+                    </a>
+                    <a onclick="navigateTo('organizations')" class="nav-link" id="nav-organizations">
+                        <i class="fa-solid fa-building w-5"></i>
+                        <span>Organizations</span>
+                    </a>
+                    <a onclick="navigateTo('users')" class="nav-link" id="nav-users">
+                        <i class="fa-solid fa-users w-5"></i>
+                        <span>Users</span>
+                    </a>
+                    <a onclick="navigateTo('groups')" class="nav-link" id="nav-groups">
+                        <i class="fa-solid fa-layer-group w-5"></i>
+                        <span>Groups</span>
+                    </a>
+                    <a onclick="navigateTo('admins')" class="nav-link" id="nav-admins">
+                        <i class="fa-solid fa-user-shield w-5"></i>
+                        <span>Admins</span>
+                    </a>
+                    <a onclick="navigateTo('reporting')" class="nav-link" id="nav-reporting">
+                        <i class="fa-solid fa-chart-bar w-5"></i>
+                        <span>Reporting</span>
+                    </a>
+                    <a onclick="navigateTo('operations')" class="nav-link" id="nav-operations">
+                        <i class="fa-solid fa-server w-5"></i>
+                        <span>Operations</span>
+                    </a>
+                    <a onclick="navigateTo('exports')" class="nav-link" id="nav-exports">
+                        <i class="fa-solid fa-file-export w-5"></i>
+                        <span>Exports</span>
+                    </a>
+                    <a onclick="navigateTo('settings')" class="nav-link" id="nav-settings">
+                        <i class="fa-solid fa-cog w-5"></i>
+                        <span>Settings</span>
+                    </a>
+                </nav>
+                
+                <!-- Footer of sidebar -->
+                <div class="px-6 pt-8 text-xs text-slate-400 flex items-center gap-2">
+                    <div class="flex-1 h-px bg-slate-200"></div>
+                    <i class="fa-solid fa-circle-check text-emerald-500"></i>
+                    All systems healthy
+                    <div class="flex-1 h-px bg-slate-200"></div>
+                </div>
+            </div>
+            
+            <!-- MAIN CONTENT AREA -->
+            <div class="main-content flex-1 p-8 overflow-y-auto">
+                
+                <!-- DASHBOARD PAGE -->
+                <div id="page-dashboard" class="page active">
+                    <div class="max-w-screen-2xl mx-auto">
+                        <h1 class="text-3xl font-semibold text-slate-900 mb-2">Good afternoon, Michael 👋</h1>
+                        <p class="text-slate-500 mb-8">Here's what's happening across your scope today</p>
+                        
+                        <!-- KPI Grid -->
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+                            <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                                <div class="flex justify-between">
+                                    <div>
+                                        <div class="text-sm text-slate-500">Active Users</div>
+                                        <div class="text-4xl font-semibold mt-2">1,284</div>
+                                    </div>
+                                    <div class="text-emerald-500 text-4xl"><i class="fa-solid fa-users"></i></div>
+                                </div>
+                                <div class="text-emerald-500 text-sm flex items-center gap-1 mt-6">
+                                    +14% <span class="text-slate-400">from last week</span>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                                <div class="flex justify-between">
+                                    <div>
+                                        <div class="text-sm text-slate-500">Avg. Improvement</div>
+                                        <div class="text-4xl font-semibold mt-2">38%</div>
+                                    </div>
+                                    <div class="text-[#00AEEF] text-4xl"><i class="fa-solid fa-arrow-trend-up"></i></div>
+                                </div>
+                                <div class="text-emerald-500 text-sm flex items-center gap-1 mt-6">
+                                    +9% <span class="text-slate-400">from last week</span>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                                <div class="flex justify-between">
+                                    <div>
+                                        <div class="text-sm text-slate-500">Utilization</div>
+                                        <div class="text-4xl font-semibold mt-2">87%</div>
+                                    </div>
+                                    <div class="text-amber-500 text-4xl"><i class="fa-solid fa-chart-pie"></i></div>
+                                </div>
+                                <div class="text-amber-500 text-sm flex items-center gap-1 mt-6">
+                                    3 orgs need attention
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                                <div class="flex justify-between">
+                                    <div>
+                                        <div class="text-sm text-slate-500">LLM Status</div>
+                                        <div class="text-4xl font-semibold mt-2 text-emerald-500">Healthy</div>
+                                    </div>
+                                    <div class="text-emerald-500 text-4xl"><i class="fa-solid fa-check-circle"></i></div>
+                                </div>
+                                <div class="text-slate-400 text-sm mt-6">2 connections need re-validation</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Trends -->
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div class="bg-white rounded-3xl p-6 shadow-sm">
+                                <h2 class="font-semibold mb-4 flex items-center gap-2"><i class="fa-solid fa-chart-line"></i> Usage Trend (30 days)</h2>
+                                <div class="h-64 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400">
+                                    <div class="text-center">
+                                        <i class="fa-solid fa-chart-line text-6xl mb-4"></i><br>
+                                        [Interactive Recharts-style line chart would go here]<br>
+                                        <span class="text-xs">Demo: Peak usage on Apr 12 • 2,841 sessions</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-3xl p-6 shadow-sm">
+                                <h2 class="font-semibold mb-4 flex items-center gap-2"><i class="fa-solid fa-arrow-trend-up"></i> Improvement Trend</h2>
+                                <div class="h-64 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400">
+                                    <div class="text-center">
+                                        [Stacked bar chart demo]<br>
+                                        <span class="text-xs">Avg. prompt improvement +41% this month</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Alerts -->
+                        <div class="mt-8 bg-white rounded-3xl p-6 shadow-sm">
+                            <h2 class="font-semibold mb-4 flex justify-between"><span>Active Alerts <span class="text-red-500">(3)</span></span> <span onclick="fakeAction('Mark all resolved')" class="text-xs text-[#00AEEF] cursor-pointer">Mark all resolved →</span></h2>
+                            <div class="space-y-4">
+                                <div class="flex gap-4 items-center border-l-4 border-red-400 pl-4">
+                                    <i class="fa-solid fa-triangle-exclamation text-red-500"></i>
+                                    <div class="flex-1">3 organizations have invalid LLM configuration</div>
+                                    <button onclick="fakeAction('Review LLM')" class="px-4 py-2 text-xs font-medium bg-slate-900 text-white rounded-2xl">Review now</button>
+                                </div>
+                                <div class="flex gap-4 items-center border-l-4 border-amber-400 pl-4">
+                                    <i class="fa-solid fa-user-clock text-amber-500"></i>
+                                    <div class="flex-1">14 users have not logged in for 30+ days</div>
+                                    <button onclick="fakeAction('View users')" class="px-4 py-2 text-xs font-medium bg-slate-900 text-white rounded-2xl">View users</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- ACTIVATION PAGE (Wizard) -->
+                <div id="page-activation" class="page">
+                    <div class="max-w-screen-2xl mx-auto">
+                        <div class="flex justify-between items-center mb-8">
+                            <div>
+                                <h1 class="text-3xl font-semibold">Activation Wizard</h1>
+                                <p class="text-slate-500">Provision a new organization • Step <span id="step-number" class="font-semibold">2 of 7</span></p>
+                            </div>
+                            <div onclick="fakeAction('Save draft')" class="flex items-center gap-2 text-[#00AEEF] cursor-pointer">
+                                <i class="fa-solid fa-floppy-disk"></i> <span class="font-medium">Save as draft</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Wizard Progress -->
+                        <div class="flex gap-2 mb-10 bg-white p-2 rounded-3xl w-fit">
+                            <div onclick="changeWizardStep(1)" class="wizard-step flex-1 min-w-[120px] text-center px-6 py-3 rounded-3xl text-sm font-medium" id="ws-1">1. Org Info</div>
+                            <div onclick="changeWizardStep(2)" class="wizard-step flex-1 min-w-[120px] text-center px-6 py-3 rounded-3xl text-sm font-medium bg-[#00AEEF] text-white" id="ws-2">2. LLM Config</div>
+                            <div onclick="changeWizardStep(3)" class="wizard-step flex-1 min-w-[120px] text-center px-6 py-3 rounded-3xl text-sm font-medium" id="ws-3">3. Runtime</div>
+                            <div onclick="changeWizardStep(4)" class="wizard-step flex-1 min-w-[120px] text-center px-6 py-3 rounded-3xl text-sm font-medium" id="ws-4">4. Groups</div>
+                            <div onclick="changeWizardStep(5)" class="wizard-step flex-1 min-w-[120px] text-center px-6 py-3 rounded-3xl text-sm font-medium" id="ws-5">5. Users</div>
+                            <div onclick="changeWizardStep(6)" class="wizard-step flex-1 min-w-[120px] text-center px-6 py-3 rounded-3xl text-sm font-medium" id="ws-6">6. Admins</div>
+                            <div onclick="changeWizardStep(7)" class="wizard-step flex-1 min-w-[120px] text-center px-6 py-3 rounded-3xl text-sm font-medium" id="ws-7">7. Review</div>
+                        </div>
+                        
+                        <!-- Current Step Content (LLM Config shown by default) -->
+                        <div class="bg-white rounded-3xl p-8 shadow-sm" id="wizard-content">
+                            <h2 class="text-xl font-semibold mb-6">LLM Configuration</h2>
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                                <!-- Left form -->
+                                <div>
+                                    <div class="mb-6">
+                                        <label class="block text-sm font-medium mb-1">Provider</label>
+                                        <select class="w-full border border-slate-200 rounded-2xl px-4 py-4 text-sm">
+                                            <option>OpenAI (Azure)</option>
+                                            <option>Anthropic</option>
+                                            <option>Groq</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-6">
+                                        <label class="block text-sm font-medium mb-1">Model</label>
+                                        <select class="w-full border border-slate-200 rounded-2xl px-4 py-4 text-sm">
+                                            <option>gpt-4o-2024-08-06</option>
+                                            <option>claude-3-5-sonnet</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-6">
+                                        <label class="block text-sm font-medium mb-1">API Key (masked)</label>
+                                        <div class="flex border border-slate-200 rounded-2xl px-4 py-4 text-sm items-center">
+                                            sk-••••••••••••••••••••••••••••••••••••••••
+                                            <button onclick="fakeAction('Rotate key')" class="ml-auto text-xs px-5 py-2 bg-slate-900 text-white rounded-2xl">Rotate</button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1">Endpoint (optional)</label>
+                                        <input type="text" value="https://api.openai.com/v1" class="w-full border border-slate-200 rounded-2xl px-4 py-4 text-sm">
+                                    </div>
+                                </div>
+                                
+                                <!-- Right status panel -->
+                                <div class="bg-slate-50 rounded-3xl p-6">
+                                    <div class="uppercase text-xs tracking-widest mb-2 text-emerald-600 font-medium">Connection Status</div>
+                                    <div class="flex items-center gap-3 text-emerald-600 mb-6">
+                                        <div class="status-dot bg-emerald-500"></div>
+                                        <span class="font-semibold">Connected • Validated 11 minutes ago</span>
+                                    </div>
+                                    <button onclick="fakeAction('Test connection')" class="w-full py-4 bg-[#00AEEF] hover:bg-[#0099D6] text-white font-medium rounded-3xl flex items-center justify-center gap-2">
+                                        <i class="fa-solid fa-plug"></i> TEST CONNECTION AGAIN
+                                    </button>
+                                    <div class="mt-8 text-xs text-slate-500 leading-relaxed">
+                                        Last validation passed all checks.<br>
+                                        Token usage within quota • Rate limit: 10k RPM
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="flex justify-end gap-4 mt-10">
+                                <button onclick="prevWizardStep()" class="px-8 py-4 text-slate-500 font-medium">← Back</button>
+                                <button onclick="nextWizardStep()" class="px-8 py-4 bg-[#00AEEF] text-white font-medium rounded-3xl flex items-center gap-2">Continue to Runtime Settings →</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- ORGANIZATIONS PAGE -->
+                <div id="page-organizations" class="page">
+                    <div class="max-w-screen-2xl mx-auto">
+                        <div class="flex justify-between mb-6">
+                            <h1 class="text-3xl font-semibold">Organizations</h1>
+                            <div class="flex gap-3">
+                                <input type="text" placeholder="Search organizations..." class="bg-white border border-slate-200 rounded-3xl px-6 py-3 text-sm w-72">
+                                <button onclick="fakeAction('New organization')" class="px-6 bg-[#00AEEF] text-white rounded-3xl flex items-center gap-2"><i class="fa-solid fa-plus"></i> New Org</button>
+                            </div>
+                        </div>
+                        
+                        <table class="w-full bg-white rounded-3xl overflow-hidden">
+                            <thead>
+                                <tr class="table-header text-left text-xs font-medium text-slate-500">
+                                    <th class="px-8 py-5">Organization</th>
+                                    <th class="px-4 py-5">Reseller</th>
+                                    <th class="px-4 py-5">Plan</th>
+                                    <th class="px-4 py-5">Status</th>
+                                    <th class="px-4 py-5">Users</th>
+                                    <th class="px-4 py-5">LLM</th>
+                                    <th class="px-4 py-5">Last Activity</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm divide-y">
+                                <tr onclick="navigateTo('org-detail')" class="cursor-pointer hover:bg-slate-50">
+                                    <td class="px-8 py-5 font-medium">Acme Corp</td>
+                                    <td class="px-4 py-5 text-slate-500">Herman Direct</td>
+                                    <td class="px-4 py-5"><span class="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-2xl">Enterprise</span></td>
+                                    <td class="px-4 py-5"><span class="px-3 py-1 bg-emerald-500 text-white text-xs rounded-2xl">Active</span></td>
+                                    <td class="px-4 py-5">842</td>
+                                    <td class="px-4 py-5"><i class="fa-solid fa-check-circle text-emerald-500"></i></td>
+                                    <td class="px-4 py-5 text-slate-500">14m ago</td>
+                                    <td class="px-8 py-5 text-right"><i class="fa-solid fa-chevron-right"></i></td>
+                                </tr>
+                                <tr onclick="navigateTo('org-detail')" class="cursor-pointer hover:bg-slate-50">
+                                    <td class="px-8 py-5 font-medium">Beta Dynamics</td>
+                                    <td class="px-4 py-5 text-slate-500">Reseller One</td>
+                                    <td class="px-4 py-5"><span class="px-3 py-1 bg-amber-100 text-amber-700 text-xs rounded-2xl">Growth</span></td>
+                                    <td class="px-4 py-5"><span class="px-3 py-1 bg-amber-500 text-white text-xs rounded-2xl">Onboarding</span></td>
+                                    <td class="px-4 py-5">214</td>
+                                    <td class="px-4 py-5"><i class="fa-solid fa-triangle-exclamation text-amber-500"></i></td>
+                                    <td class="px-4 py-5 text-slate-500">2d ago</td>
+                                    <td class="px-8 py-5 text-right"><i class="fa-solid fa-chevron-right"></i></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- ORGANIZATION DETAIL (example tabs) -->
+                <div id="page-org-detail" class="page">
+                    <div class="max-w-screen-2xl mx-auto">
+                        <div class="flex items-center gap-4 mb-6">
+                            <div onclick="navigateTo('organizations')" class="cursor-pointer"><i class="fa-solid fa-arrow-left text-xl"></i></div>
+                            <h1 class="text-3xl font-semibold">Acme Corp • Overview</h1>
+                            <span class="px-4 py-1 bg-emerald-500 text-white text-sm rounded-3xl">Active</span>
+                        </div>
+                        
+                        <div class="flex border-b mb-8">
+                            <div onclick="switchOrgTab(0)" class="org-tab px-8 py-4 border-b-2 border-transparent hover:border-slate-300 cursor-pointer font-medium active" id="orgtab-0">Overview</div>
+                            <div onclick="switchOrgTab(1)" class="org-tab px-8 py-4 border-b-2 border-transparent hover:border-slate-300 cursor-pointer font-medium" id="orgtab-1">Users</div>
+                            <div onclick="switchOrgTab(2)" class="org-tab px-8 py-4 border-b-2 border-transparent hover:border-slate-300 cursor-pointer font-medium" id="orgtab-2">Groups</div>
+                            <div onclick="switchOrgTab(3)" class="org-tab px-8 py-4 border-b-2 border-transparent hover:border-slate-300 cursor-pointer font-medium" id="orgtab-3">LLM Config</div>
+                            <div onclick="switchOrgTab(4)" class="org-tab px-8 py-4 border-b-2 border-transparent hover:border-slate-300 cursor-pointer font-medium" id="orgtab-4">Onboarding</div>
+                        </div>
+                        
+                        <!-- Overview tab content -->
+                        <div id="orgtab-content-0">
+                            <div class="grid grid-cols-3 gap-6">
+                                <div class="bg-white p-6 rounded-3xl">KPI cards and trend charts would render here (same as dashboard style)</div>
+                                <div class="bg-white p-6 rounded-3xl">Improvement trend chart</div>
+                                <div class="bg-white p-6 rounded-3xl">Attention items</div>
+                            </div>
+                        </div>
+                        
+                        <!-- LLM Config tab (demo) -->
+                        <div id="orgtab-content-3" class="hidden">
+                            <div class="bg-white rounded-3xl p-8">
+                                <h2 class="text-xl font-semibold mb-6">LLM Configuration for Acme Corp</h2>
+                                <p class="text-emerald-600 mb-8">✅ Last validated 41 minutes ago</p>
+                                <div class="grid grid-cols-3 gap-6 text-sm">
+                                    <div>Provider: <strong>OpenAI Azure</strong></div>
+                                    <div>Model: <strong>gpt-4o</strong></div>
+                                    <div>Status: <span class="text-emerald-500">Healthy</span></div>
+                                </div>
+                                <button onclick="fakeAction('Re-validate LLM')" class="mt-10 px-8 py-4 border border-slate-300 rounded-3xl">Re-validate connection</button>
+                            </div>
+                        </div>
+                        
+                        <p class="text-xs text-slate-400 mt-8">Other tabs follow the same pattern as the architecture spec.</p>
+                    </div>
+                </div>
+                
+                <!-- USERS PAGE (placeholder) -->
+                <div id="page-users" class="page">
+                    <h1 class="text-3xl font-semibold mb-6">Users</h1>
+                    <div class="bg-white rounded-3xl p-8 text-center text-slate-400">
+                        Full users table with filters, bulk actions, and export would appear here.<br>
+                        (Matches wireframe columns: User • Group • Status • Last Activity • Sessions • Improvement)
+                    </div>
+                </div>
+                
+                <!-- GROUPS, ADMINS, REPORTING, OPERATIONS, EXPORTS, SETTINGS are placeholder pages -->
+                <div id="page-groups" class="page"><div class="max-w-screen-2xl mx-auto"><h1 class="text-3xl font-semibold mb-6">Groups</h1><div class="bg-white rounded-3xl p-8 text-slate-400 text-center">Group management table and detail views per architecture spec.</div></div></div>
+                <div id="page-admins" class="page"><div class="max-w-screen-2xl mx-auto"><h1 class="text-3xl font-semibold mb-6">Admins</h1><div class="bg-white rounded-3xl p-8 text-slate-400 text-center">Admin list with role &amp; scope editing.</div></div></div>
+                <div id="page-reporting" class="page"><div class="max-w-screen-2xl mx-auto"><h1 class="text-3xl font-semibold mb-6">Reporting</h1><div class="bg-white rounded-3xl p-8 text-slate-400 text-center">Report builder • dimension selector • charts + table + export (per spec).</div></div></div>
+                <div id="page-operations" class="page"><div class="max-w-screen-2xl mx-auto"><h1 class="text-3xl font-semibold mb-6">Operations</h1><div class="bg-white rounded-3xl p-8 text-slate-400 text-center">Internal system health • KPIs • traffic graphs (HS internal only).</div></div></div>
+                <div id="page-exports" class="page"><div class="max-w-screen-2xl mx-auto"><h1 class="text-3xl font-semibold mb-6">Exports</h1><div class="bg-white rounded-3xl p-8 text-slate-400 text-center">Export job history table with download links.</div></div></div>
+                <div id="page-settings" class="page"><div class="max-w-screen-2xl mx-auto"><h1 class="text-3xl font-semibold mb-6">Settings</h1><div class="bg-white rounded-3xl p-8 text-slate-400 text-center">Profile + tenant settings panels.</div></div></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Tailwind initialization
+        function initializeTailwind() {
+            tailwind.config = {
+                content: [],
+                theme: {
+                    extend: {
+                        colors: {
+                            primary: '#00AEEF'
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Navigation between main pages
+        let currentPage = 'dashboard'
+        
+        function navigateTo(page) {
+            // Hide all pages
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'))
+            // Show requested page
+            const target = document.getElementById(`page-${page}`)
+            if (target) target.classList.add('active')
+            
+            // Update sidebar active state
+            document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'))
+            const activeLink = document.getElementById(`nav-${page}`)
+            if (activeLink) activeLink.classList.add('active')
+            
+            currentPage = page
+            
+            // Special case for org detail
+            if (page === 'org-detail') {
+                switchOrgTab(0)
+            }
+        }
+        
+        // Wizard step handling
+        let currentWizardStep = 2
+        
+        function changeWizardStep(step) {
+            currentWizardStep = step
+            document.getElementById('step-number').textContent = `${step} of 7`
+            
+            // Highlight active step
+            document.querySelectorAll('.wizard-step').forEach(el => {
+                if (parseInt(el.id.replace('ws-', '')) === step) {
+                    el.classList.add('bg-[#00AEEF]', 'text-white')
+                    el.classList.remove('bg-transparent')
+                } else {
+                    el.classList.remove('bg-[#00AEEF]', 'text-white')
+                }
+            })
+            
+            // For demo we only show LLM step content; others would be swapped in real app
+            const content = document.getElementById('wizard-content')
+            if (step === 2) {
+                content.innerHTML = `
+                    <h2 class="text-xl font-semibold mb-6">LLM Configuration</h2>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                        <div>
+                            <div class="mb-6"><label class="block text-sm font-medium mb-1">Provider</label><select class="w-full border border-slate-200 rounded-2xl px-4 py-4 text-sm"><option selected>OpenAI (Azure)</option></select></div>
+                            <div class="mb-6"><label class="block text-sm font-medium mb-1">Model</label><select class="w-full border border-slate-200 rounded-2xl px-4 py-4 text-sm"><option selected>gpt-4o-2024-08-06</option></select></div>
+                            <div class="mb-6"><label class="block text-sm font-medium mb-1">API Key (masked)</label><div class="flex border border-slate-200 rounded-2xl px-4 py-4 text-sm items-center">sk-••••••••••••••••••••••••••••••••••••••••<button onclick="fakeAction('Rotate key')" class="ml-auto text-xs px-5 py-2 bg-slate-900 text-white rounded-2xl">Rotate</button></div></div>
+                            <div><label class="block text-sm font-medium mb-1">Endpoint (optional)</label><input type="text" value="https://api.openai.com/v1" class="w-full border border-slate-200 rounded-2xl px-4 py-4 text-sm"></div>
+                        </div>
+                        <div class="bg-slate-50 rounded-3xl p-6">
+                            <div class="uppercase text-xs tracking-widest mb-2 text-emerald-600 font-medium">Connection Status</div>
+                            <div class="flex items-center gap-3 text-emerald-600 mb-6"><div class="status-dot bg-emerald-500"></div><span class="font-semibold">Connected • Validated 11 minutes ago</span></div>
+                            <button onclick="fakeAction('Test connection')" class="w-full py-4 bg-[#00AEEF] hover:bg-[#0099D6] text-white font-medium rounded-3xl flex items-center justify-center gap-2"><i class="fa-solid fa-plug"></i> TEST CONNECTION AGAIN</button>
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-4 mt-10">
+                        <button onclick="prevWizardStep()" class="px-8 py-4 text-slate-500 font-medium">← Back</button>
+                        <button onclick="nextWizardStep()" class="px-8 py-4 bg-[#00AEEF] text-white font-medium rounded-3xl flex items-center gap-2">Continue to Runtime Settings →</button>
+                    </div>
+                `
+            } else {
+                content.innerHTML = `<div class="p-12 text-center text-slate-400">Step ${step} content would render here per the architecture spec wireframes.<br><br>Full wizard flow with validation, save draft, and progress saved across sessions.</div>`
+            }
+        }
+        
+        function nextWizardStep() {
+            if (currentWizardStep < 7) changeWizardStep(currentWizardStep + 1)
+        }
+        
+        function prevWizardStep() {
+            if (currentWizardStep > 1) changeWizardStep(currentWizardStep - 1)
+        }
+        
+        // Organization detail tabs
+        function switchOrgTab(tabIndex) {
+            document.querySelectorAll('.org-tab').forEach(tab => tab.classList.remove('active', 'border-[#00AEEF]'))
+            document.getElementById(`orgtab-${tabIndex}`).classList.add('active', 'border-[#00AEEF]')
+            
+            // Hide all tab contents
+            document.querySelectorAll('[id^="orgtab-content-"]').forEach(el => el.classList.add('hidden'))
+            // Show selected
+            const target = document.getElementById(`orgtab-content-${tabIndex}`)
+            if (target) target.classList.remove('hidden')
+        }
+        
+        // Fake interactive actions
+        function fakeAction(message) {
+            const toast = document.createElement('div')
+            toast.style.cssText = 'position:fixed; bottom:24px; right:24px; background:#00AEEF; color:white; padding:16px 24px; border-radius:9999px; box-shadow:0 10px 15px -3px rgb(0 174 239); display:flex; align-items:center; gap:12px; z-index:9999;'
+            toast.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${message}`
+            document.body.appendChild(toast)
+            
+            setTimeout(() => {
+                toast.style.transform = 'translateY(100px)'
+                setTimeout(() => toast.remove(), 300)
+            }, 2400)
+        }
+        
+        // Keyboard shortcuts hint (as in real app)
+        console.log('%c✅ Herman Prompt Admin Demo loaded successfully\nLeft menu switches pages • Wizard is fully interactive • Matches HermanScience branding exactly (blue #00AEEF + gray palette)', 'background:#00AEEF;color:white;padding:1px 4px;border-radius:2px')
+        
+        // Initialize everything
+        window.onload = function() {
+            initializeTailwind()
+            // Pre-load wizard step 2
+            console.log('Non-functional demo ready. Open this file in any modern browser. No server required.')
+        }
+    </script>
+</body>
+</html>

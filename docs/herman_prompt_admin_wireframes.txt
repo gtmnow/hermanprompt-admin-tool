@@ -1,0 +1,251 @@
+HERMAN PROMPT ADMIN TOOL - UX WIREFRAMES
+
+==================================================
+1. GLOBAL APP SHELL
+==================================================
+
+[Top Bar]
+Logo | Tenant/Reseller Selector | User Menu
+
+[Left Navigation]
+- Dashboard
+- Activation
+- Organizations
+- Users
+- Groups
+- Admins
+- Reporting
+- Operations
+- Exports
+- Settings
+
+[Main Content Area]
+
+
+==================================================
+2. DASHBOARD
+==================================================
+
+KPI Cards:
+- Active Users
+- Avg Improvement
+- Utilization
+- LLM Status
+
+Graphs:
+- Usage Trend
+- Improvement Trend
+
+Alerts:
+- Orgs with invalid LLM config
+- Inactive users
+- Incomplete onboarding
+
+
+==================================================
+3. ACTIVATION WIZARD
+==================================================
+
+Steps:
+1. Organization Info
+2. LLM Configuration
+3. Runtime Settings
+4. Groups Setup
+5. Users Upload
+6. Admin Setup
+7. Review & Activate
+
+Each step includes:
+- Progress bar
+- Status panel
+- Next/Back navigation
+
+
+--- Step 2: LLM Configuration ---
+
+Left:
+- Provider (dropdown)
+- Model (dropdown)
+- API Key (masked)
+- Endpoint (optional)
+
+Right:
+- Connection Status
+- Test Button
+- Result Output
+
+
+--- Step 5: User Upload ---
+
+- Upload CSV
+- Preview table
+- Error handling
+- Confirm import
+
+
+--- Step 7: Activation Review ---
+
+Checklist:
+- Org created
+- LLM configured
+- LLM validated
+- Users uploaded
+- Admin assigned
+- Activity status
+
+Button:
+- Activate Organization
+
+
+==================================================
+4. ORGANIZATIONS
+==================================================
+
+Table:
+Org | Status | Users | Active | LLM | Last Activity
+
+Filters:
+- Status
+- Reseller
+- Search
+
+Click → Organization Detail
+
+
+==================================================
+5. ORGANIZATION DETAIL
+==================================================
+
+Tabs:
+- Overview
+- Users
+- Groups
+- Admins
+- LLM Config
+- Reporting
+- Onboarding
+
+Overview:
+- KPI Cards
+- Trend graphs
+
+LLM Config:
+- Provider
+- Model
+- API Key (masked)
+- Status
+- Re-test / Rotate
+
+Onboarding:
+- Checklist
+- Status indicator
+
+
+==================================================
+6. USERS
+==================================================
+
+Table:
+User | Group | Status | Last Activity | Sessions | Improvement
+
+Filters:
+- Group
+- Status
+- Utilization
+
+User Detail:
+- Status
+- Groups
+- Activity
+- Utilization level
+- Score trend graph
+- Metrics
+- Behavior insights
+
+
+==================================================
+7. GROUPS
+==================================================
+
+Table:
+Group | Users | Active | Avg Improvement
+
+Group Detail:
+- KPI cards
+- Trend graph
+- User list
+
+
+==================================================
+8. ADMINS
+==================================================
+
+Table:
+Admin | Role | Scope | Permissions
+
+Admin Edit:
+- Role selection
+- Scope selection (global/reseller/org/group)
+- Permission checkboxes
+
+
+==================================================
+9. REPORTING
+==================================================
+
+Controls:
+- Report Type
+- Dimension
+- Scope
+- Date Range
+- Filters
+
+Output:
+- KPI cards
+- Graph
+- Table
+- Export CSV
+
+
+==================================================
+10. RESELLER PORTFOLIO
+==================================================
+
+Table:
+Org | Status | Users | Active | Improvement | Utilization
+
+Filters:
+- Status
+- Activity level
+
+
+==================================================
+11. OPERATIONS
+==================================================
+
+KPI:
+- Requests/sec
+- Latency
+- Errors
+
+Graphs:
+- Traffic
+- Failures
+
+Table:
+Tenant | Errors | Last Failure
+
+
+==================================================
+12. EXPORTS
+==================================================
+
+Table:
+Report | Status | Requested By | Created | Download
+
+Actions:
+- New Export
+
+
+==================================================
+END OF WIREFRAMES
