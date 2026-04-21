@@ -5,9 +5,16 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import AdminPermission, AdminScope, AdminUser
 from app.schemas import AdminCreate, AdminUpdate, AdminUserSummary, ListEnvelope, ResourceEnvelope
-from app.schemas.admins import AdminPermissionSummary, AdminScopeSummary
+from app.schemas.admins import AdminPermissionSummary, AdminProfileSummary, AdminScopeSummary
 from app.security import Principal, require_permission
-from app.services import ensure_scope_access, get_admin_or_404, refresh_onboarding_state, serialize_model, write_audit_log
+from app.services import (
+    ensure_scope_access,
+    get_admin_or_404,
+    refresh_onboarding_state,
+    serialize_model,
+    upsert_admin_profile,
+    write_audit_log,
+)
 
 router = APIRouter()
 
@@ -32,6 +39,7 @@ def to_admin_summary(admin: AdminUser) -> AdminUserSummary:
             )
             for item in admin.scopes
         ],
+        profile=AdminProfileSummary.model_validate(admin.profile, from_attributes=True) if admin.profile else None,
     )
 
 
@@ -70,6 +78,7 @@ def create_admin(
     admin = AdminUser(user_id_hash=payload.user_id_hash, role=payload.role, is_active=True)
     db.add(admin)
     db.flush()
+    upsert_admin_profile(db, admin, payload.model_dump(mode="json"))
 
     for permission in payload.permissions:
         if permission not in principal.permissions and principal.role != "super_admin":
@@ -114,6 +123,13 @@ def update_admin(
 
     if payload.is_active is not None:
         admin.is_active = payload.is_active
+    profile_updates = {
+        key: value
+        for key, value in payload.model_dump(exclude_none=True, mode="json").items()
+        if key in {"display_name", "email"}
+    }
+    if profile_updates:
+        upsert_admin_profile(db, admin, profile_updates)
     if payload.permissions is not None:
         db.execute(delete(AdminPermission).where(AdminPermission.admin_user_id == admin.id))
         for permission in payload.permissions:

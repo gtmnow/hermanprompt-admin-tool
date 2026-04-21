@@ -20,16 +20,25 @@ class AdminCreate(BaseModel):
     role: str = Field(min_length=1, max_length=50)
     permissions: list[str] = Field(default_factory=list)
     scopes: list[AdminScopeAssignment] = Field(default_factory=list)
+    display_name: str | None = None
+    email: str | None = None
 
 
 class AdminUpdate(BaseModel):
     is_active: bool | None = None
     permissions: list[str] | None = None
     scopes: list[AdminScopeAssignment] | None = None
+    display_name: str | None = None
+    email: str | None = None
 
 
 class AdminPermissionSummary(BaseModel):
     permission_key: str
+
+
+class AdminProfileSummary(BaseModel):
+    display_name: str | None = None
+    email: str | None = None
 
 
 class AdminScopeSummary(AdminScopeAssignment):
@@ -46,3 +55,4 @@ class AdminUserSummary(BaseModel):
     updated_at: datetime
     permissions: list[AdminPermissionSummary] = Field(default_factory=list)
     scopes: list[AdminScopeSummary] = Field(default_factory=list)
+    profile: AdminProfileSummary | None = None

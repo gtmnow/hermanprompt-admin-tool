@@ -3,6 +3,7 @@
 # Python
 __pycache__/
 *.py[cod]
+.venv/
 
 # Frontend build artifacts
 node_modules/
@@ -16,3 +17,8 @@ data/
 
 # Environment files
 .env
+
+# Local scratch / generated metadata
+.codex-tmp/
+*.egg-info/
+~$*.xlsx

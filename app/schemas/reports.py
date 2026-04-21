@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -13,16 +13,16 @@ class ReportRunRequest(BaseModel):
     dimension: ReportScope
     scope_id: str
     filters: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
-    start_date: date
-    end_date: date
+    start_date: datetime
+    end_date: datetime
     visualization_preferences: dict[str, str | int | bool] = Field(default_factory=dict)
 
 
 class ReportFilterSet(BaseModel):
     scope_type: ReportScope
     scope_id: str
-    start_date: date
-    end_date: date
+    start_date: datetime
+    end_date: datetime
     include_csv_export: bool = False
 
 
@@ -34,7 +34,7 @@ class KpiCard(BaseModel):
 
 class ChartSeriesPoint(BaseModel):
     bucket: str
-    value: float
+    value: float | None
 
 
 class ChartSeries(BaseModel):
@@ -56,8 +56,8 @@ class ReportExportRequest(BaseModel):
     dimension: ReportScope
     scope_id: str
     filters: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
-    start_date: date
-    end_date: date
+    start_date: datetime
+    end_date: datetime
     format: ExportFormat = "csv"
 
 

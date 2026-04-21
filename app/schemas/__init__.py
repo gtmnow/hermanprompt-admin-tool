@@ -1,7 +1,7 @@
-from app.schemas.admins import AdminCreate, AdminUpdate, AdminUserSummary
+from app.schemas.admins import AdminCreate, AdminProfileSummary, AdminUpdate, AdminUserSummary
 from app.schemas.audit import AuditLogEntry
 from app.schemas.common import ListEnvelope, ResourceEnvelope
-from app.schemas.groups import Group, GroupCreate, GroupUpdate
+from app.schemas.groups import Group, GroupCreate, GroupProfile, GroupUpdate
 from app.schemas.onboarding import TenantOnboardingStatus
 from app.schemas.reports import (
     ReportExportJobSummary,
@@ -10,6 +10,18 @@ from app.schemas.reports import (
     ReportRunRequest,
     ReportSummary,
 )
+from app.schemas.settings import (
+    DatabaseInstanceConfigCreate,
+    DatabaseInstanceConfigSummary,
+    DatabaseInstanceConfigUpdate,
+    PlatformManagedLlmConfigCreate,
+    PlatformManagedLlmConfigSummary,
+    PlatformManagedLlmConfigUpdate,
+    PromptUiInstanceConfigCreate,
+    PromptUiInstanceConfigSummary,
+    PromptUiInstanceConfigUpdate,
+    SecretVaultStatusSummary,
+)
 from app.schemas.resellers import ResellerPartner, ResellerPartnerCreate, ResellerPartnerUpdate
 from app.schemas.system import SystemOverview
 from app.schemas.tenants import (
@@ -17,21 +29,41 @@ from app.schemas.tenants import (
     TenantCreate,
     TenantLLMConfig,
     TenantLLMConfigUpdate,
+    TenantPortalConfig,
+    TenantProfile,
     TenantRuntimeSettings,
     TenantRuntimeSettingsUpdate,
     TenantSummary,
     TenantUpdate,
     TenantValidationResult,
 )
-from app.schemas.users import UserMembershipCreate, UserMembershipSummary, UserMembershipUpdate
+from app.schemas.users import (
+    UserLifecycleActionRequest,
+    UserMembershipCreate,
+    UserMembershipProfileSummary,
+    UserMembershipSummary,
+    UserMembershipUpdate,
+)
 
 __all__ = [
     "AdminCreate",
+    "AdminProfileSummary",
     "AdminUpdate",
     "AdminUserSummary",
     "AuditLogEntry",
+    "DatabaseInstanceConfigCreate",
+    "DatabaseInstanceConfigSummary",
+    "DatabaseInstanceConfigUpdate",
+    "PlatformManagedLlmConfigCreate",
+    "PlatformManagedLlmConfigSummary",
+    "PlatformManagedLlmConfigUpdate",
+    "PromptUiInstanceConfigCreate",
+    "PromptUiInstanceConfigSummary",
+    "PromptUiInstanceConfigUpdate",
+    "SecretVaultStatusSummary",
     "Group",
     "GroupCreate",
+    "GroupProfile",
     "GroupUpdate",
     "ListEnvelope",
     "ReportExportJobSummary",
@@ -48,13 +80,17 @@ __all__ = [
     "TenantCreate",
     "TenantLLMConfig",
     "TenantLLMConfigUpdate",
+    "TenantPortalConfig",
     "TenantOnboardingStatus",
+    "TenantProfile",
     "TenantRuntimeSettings",
     "TenantRuntimeSettingsUpdate",
     "TenantSummary",
     "TenantUpdate",
     "TenantValidationResult",
+    "UserLifecycleActionRequest",
     "UserMembershipCreate",
+    "UserMembershipProfileSummary",
     "UserMembershipSummary",
     "UserMembershipUpdate",
 ]

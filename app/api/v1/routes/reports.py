@@ -50,13 +50,18 @@ def run_report(
         ],
         charts=[
             ChartSeries(
+                label="Usage Trend",
+                points=[ChartSeriesPoint(bucket=item["bucket"], value=item["value"]) for item in metrics["usage_series"]],
+            ),
+            ChartSeries(
                 label="Improvement Trend",
-                points=[ChartSeriesPoint(bucket=item["bucket"], value=item["value"]) for item in metrics["series"]],
+                points=[ChartSeriesPoint(bucket=item["bucket"], value=item["value"]) for item in metrics["improvement_series"]],
             )
         ],
         tables=[
             {"metric": "tenant_count", "value": metrics["tenant_count"]},
             {"metric": "active_users", "value": metrics["active_users"]},
+            {"metric": "session_user_count", "value": metrics["session_user_count"]},
             {"metric": "active_groups", "value": metrics["active_groups"]},
         ],
     )

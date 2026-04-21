@@ -79,6 +79,7 @@ export function OrganizationsPage() {
                 <tr>
                   <th>Organization</th>
                   <th>Status</th>
+                  <th>Profile</th>
                   <th>Users</th>
                   <th>LLM</th>
                   <th>Plan</th>
@@ -92,13 +93,17 @@ export function OrganizationsPage() {
                   return (
                     <tr key={item.tenant.id}>
                       <td>
-                        <Link to={`/orgs/${item.tenant.id}`} style={{ fontWeight: 700, color: "var(--text-strong)" }}>
+                        <Link className="table-link" to={`/orgs/${item.tenant.id}`}>
                           {item.tenant.tenant_name}
                         </Link>
                         <div className="muted">{item.tenant.tenant_key}</div>
                       </td>
                       <td>
                         <StatusBadge value={item.tenant.status} />
+                      </td>
+                      <td>
+                        <strong>{item.profile?.industry ?? "Pending"}</strong>
+                        <div className="muted">{item.profile?.service_mode ?? item.profile?.organization_type ?? "Profile incomplete"}</div>
                       </td>
                       <td>
                         <strong>{tenantUsers.length}</strong>

@@ -99,7 +99,7 @@ export function ActivationLandingPage() {
                     <StatusBadge value={item.onboarding?.onboarding_status ?? "draft"} />
                   </td>
                   <td>
-                    <Link className="secondary-button" to={`/activation/${item.tenant.tenant.id}`}>
+                    <Link className="secondary-button activation-action-button" to={`/activation/${item.tenant.tenant.id}`}>
                       Resume
                     </Link>
                   </td>

@@ -10,6 +10,9 @@ class GroupBase(BaseModel):
     group_type: str | None = None
     parent_group_id: UUID | None = None
     is_active: bool = True
+    description: str | None = None
+    business_unit: str | None = None
+    owner_name: str | None = None
 
 
 class GroupCreate(GroupBase):
@@ -21,9 +24,19 @@ class GroupUpdate(BaseModel):
     group_type: str | None = None
     parent_group_id: UUID | None = None
     is_active: bool | None = None
+    description: str | None = None
+    business_unit: str | None = None
+    owner_name: str | None = None
+
+
+class GroupProfile(BaseModel):
+    description: str | None = None
+    business_unit: str | None = None
+    owner_name: str | None = None
 
 
 class Group(GroupBase):
     id: UUID = Field(default_factory=uuid4)
     created_at: datetime
     updated_at: datetime
+    profile: GroupProfile | None = None

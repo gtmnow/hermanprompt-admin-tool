@@ -33,6 +33,9 @@ export type TenantLLMConfig = {
   endpoint_url: string | null;
   api_key_masked: string | null;
   secret_reference: string | null;
+  secret_source: "vault_managed" | "external_reference" | "none";
+  vault_provider: string | null;
+  platform_managed_config_id: string | null;
   credential_mode: "platform_managed" | "customer_managed";
   credential_status: "unvalidated" | "valid" | "invalid" | "suspended";
   transformation_enabled: boolean;
@@ -51,8 +54,31 @@ export type TenantRuntimeSettings = {
   feature_flags_json: Record<string, string | number | boolean>;
 };
 
+export type TenantProfile = {
+  organization_type: string | null;
+  industry: string | null;
+  primary_contact_name: string | null;
+  primary_contact_email: string | null;
+  service_mode: string | null;
+  deployment_notes: string | null;
+  last_activity_at: string | null;
+  utilization_pct: number | null;
+};
+
+export type TenantPortalConfig = {
+  id: string | null;
+  portal_base_url: string;
+  logo_url: string | null;
+  welcome_message: string | null;
+  is_active: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
 export type TenantSummary = {
   tenant: Tenant;
+  profile: TenantProfile | null;
+  portal_config: TenantPortalConfig | null;
   llm_config: TenantLLMConfig | null;
   runtime_settings: TenantRuntimeSettings | null;
 };
@@ -72,6 +98,14 @@ export type TenantOnboarding = {
   updated_at: string;
 };
 
+export type TenantValidationResult = {
+  validation_result: "unvalidated" | "valid" | "invalid" | "suspended";
+  provider_echo: string;
+  model_accessible: boolean;
+  latency_ms: number | null;
+  message: string | null;
+};
+
 export type UserMembership = {
   id: string;
   user_id_hash: string;
@@ -81,6 +115,16 @@ export type UserMembership = {
   created_at: string;
   updated_at: string;
   group_memberships: Array<{ group_id: string }>;
+  profile: {
+    first_name: string | null;
+    last_name: string | null;
+    email: string | null;
+    title: string | null;
+    utilization_level: string | null;
+    sessions_count: number;
+    avg_improvement_pct: number | null;
+    last_activity_at: string | null;
+  } | null;
 };
 
 export type Group = {
@@ -92,6 +136,11 @@ export type Group = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  profile: {
+    description: string | null;
+    business_unit: string | null;
+    owner_name: string | null;
+  } | null;
 };
 
 export type AdminScope = {
@@ -112,6 +161,65 @@ export type AdminUser = {
   updated_at: string;
   permissions: Array<{ permission_key: string }>;
   scopes: AdminScope[];
+  profile: {
+    display_name: string | null;
+    email: string | null;
+  } | null;
+};
+
+export type DatabaseInstanceConfig = {
+  id: string;
+  label: string;
+  db_kind: string;
+  host: string | null;
+  database_name: string | null;
+  connection_string_masked: string | null;
+  connection_secret_reference: string | null;
+  secret_source: "vault_managed" | "external_reference" | "none";
+  vault_provider: string | null;
+  notes: string | null;
+  is_active: boolean;
+  managed_via_db_only: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SecretVaultStatus = {
+  provider: string;
+  display_name: string;
+  configured: boolean;
+  writable: boolean;
+  reference_prefix: string;
+  key_source: string;
+  azure_key_vault_url: string | null;
+  managed_secret_count: number;
+  warnings: string[];
+};
+
+export type PromptUiInstanceConfig = {
+  id: string;
+  label: string;
+  base_url: string;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlatformManagedLlmConfig = {
+  id: string;
+  label: string;
+  provider_type: string;
+  model_name: string;
+  endpoint_url: string | null;
+  api_key_masked: string | null;
+  secret_reference: string | null;
+  secret_source: "vault_managed" | "external_reference" | "none";
+  vault_provider: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ReportSummary = {
@@ -126,7 +234,7 @@ export type ReportSummary = {
   kpis: Array<{ label: string; value: string | number; delta?: string | number | null }>;
   charts: Array<{
     label: string;
-    points: Array<{ bucket: string; value: number }>;
+    points: Array<{ bucket: string; value: number | null }>;
   }>;
   tables: Array<Record<string, string | number | null>>;
   export_formats: string[];

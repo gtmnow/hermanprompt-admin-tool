@@ -120,7 +120,14 @@ Navigation items are role-aware.
 ## 4.2 Route Grouping
 
 ### Public Routes
-Not in scope for this admin tool beyond auth handoff.
+The admin tool itself does not own the end-user auth UX, but it now depends on a Herman Portal auth handoff contract.
+
+For the platform-wide experience, the Herman Portal must implement public routes for:
+
+- `/login`
+- `/invite`
+
+The detailed requirements and shared schema contract live in [portal_auth_and_invitation_spec.md](/Users/michaelanderson/projects/Herman-Admin/docs/portal_auth_and_invitation_spec.md:1).
 
 ### Protected Routes
 All routes listed above are protected and require:
@@ -312,13 +319,15 @@ Provision and activate a customer organization through a guided workflow.
 - `LLMProviderSelect`
 - `ModelSelect`
 - `ApiKeyField`
+- `SecretReferenceField`
 - `EndpointField`
+- `VaultStatusHint`
 - `ValidationStatusCard`
 - `TestConnectionButton`
 - `ValidationResultPanel`
 
 #### APIs
-- `POST /tenants/:tenantId/llm-config`
+- `PUT /tenants/:tenantId/llm-config`
 - `POST /tenants/:tenantId/llm-config/validate`
 
 ### Step 3: Runtime Settings Step
@@ -510,17 +519,25 @@ Use nested routes or tab state synced to route.
 #### Route
 `/orgs/:tenantId/llm-config`
 
+#### Secret Handling Rules
+- pasted API keys must never be persisted directly in tenant-facing admin tables
+- the backend writes new LLM credentials into the admin vault and returns only masked credential state plus a vault reference
+- validation must check both provider/model completeness and whether the configured secret reference can be resolved
+- external references such as Azure Key Vault secret URLs can be displayed and saved even before full external vault resolution is implemented
+
 #### Components
 - `OrgLLMConfigTab`
 - `LLMConfigForm`
 - `CredentialMaskedField`
+- `CredentialSourceField`
+- `SecretReferenceField`
 - `ValidationStatusCard`
 - `RevalidateButton`
 - `RotateCredentialButton`
 
 #### APIs
 - `GET /tenants/:tenantId/llm-config`
-- `POST /tenants/:tenantId/llm-config`
+- `PUT /tenants/:tenantId/llm-config`
 - `POST /tenants/:tenantId/llm-config/validate`
 
 ---
@@ -841,19 +858,36 @@ Track export requests and download generated files.
 - `/settings/tenant`
 
 ### Purpose
-House user-level and tenant-level configuration.
+House operator-facing configuration, including active database targeting, prompt UI pointers, and secret vault status.
 
 ### Components
 - `SettingsPage`
 - `ProfileSettingsForm`
 - `TenantSettingsPanel`
 - `NotificationSettingsPanel`
+- `DatabaseInstanceRegistry`
+- `PromptUiInstanceRegistry`
+- `SecretVaultStatusPanel`
 
 ### APIs
 - `GET /me`
 - `PATCH /me`
 - `GET /tenants/:tenantId/settings`
 - `PATCH /tenants/:tenantId/settings`
+- `GET /settings/secret-vault`
+- `GET /settings/database-instances`
+- `POST /settings/database-instances`
+- `PATCH /settings/database-instances/:id`
+- `GET /settings/prompt-ui-instances`
+- `POST /settings/prompt-ui-instances`
+- `PATCH /settings/prompt-ui-instances/:id`
+
+### Secret Vault Notes
+- database target credentials follow the same vault-backed pattern as tenant LLM credentials
+- the UI may accept either:
+  - a raw connection string, which the backend should store in the admin vault
+  - an external secret reference, when the secret already exists in another vault
+- settings screens should display masked values, secret source, and reference metadata, but never the underlying plaintext secret
 
 ---
 
@@ -1054,7 +1088,7 @@ Examples:
 | Screen | Primary APIs |
 |---|---|
 | Dashboard | `/dashboard/summary`, `/dashboard/trends`, `/dashboard/alerts` |
-| Activation Wizard | `/tenants`, `/tenants/:id/llm-config`, `/tenants/:id/llm-config/validate`, `/groups`, `/users/import`, `/admins`, `/tenants/:id/activate` |
+| Activation Wizard | `/tenants`, `/tenants/:id/llm-config`, `/tenants/:id/llm-config/validate`, `/settings/secret-vault`, `/groups`, `/users/import`, `/admins`, `/tenants/:id/activate` |
 | Organizations List | `/tenants` |
 | Org Detail Overview | `/analytics/tenant/:id/summary`, `/analytics/tenant/:id/trends` |
 | Org Users | `/users?tenant_id=` |
@@ -1070,7 +1104,7 @@ Examples:
 | Reports | `/reports/query`, `/exports` |
 | Operations | `/system/overview`, `/system/issues`, `/system/trends` |
 | Exports | `/exports`, `/exports/:jobId` |
-| Settings | `/me`, `/tenants/:id/settings` |
+| Settings | `/me`, `/tenants/:id/settings`, `/settings/secret-vault`, `/settings/database-instances`, `/settings/prompt-ui-instances` |
 
 ---
 

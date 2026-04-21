@@ -51,6 +51,8 @@ class Tenant(TimestampMixin, Base):
     llm_config: Mapped["TenantLLMConfig | None"] = relationship(back_populates="tenant", uselist=False)
     runtime_settings: Mapped["TenantRuntimeSettings | None"] = relationship(back_populates="tenant", uselist=False)
     onboarding_status: Mapped["TenantOnboardingStatus | None"] = relationship(back_populates="tenant", uselist=False)
+    profile: Mapped["TenantProfile | None"] = relationship(back_populates="tenant", uselist=False)
+    portal_config: Mapped["TenantPortalConfig | None"] = relationship(back_populates="tenant", uselist=False)
 
 
 class Group(TimestampMixin, Base):
@@ -64,6 +66,36 @@ class Group(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="groups", foreign_keys=[tenant_id])
+    profile: Mapped["GroupProfile | None"] = relationship(back_populates="group", uselist=False)
+
+
+class TenantProfile(TimestampMixin, Base):
+    __tablename__ = "tenant_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), unique=True, index=True)
+    organization_type: Mapped[str | None] = mapped_column(String(100))
+    industry: Mapped[str | None] = mapped_column(String(100))
+    primary_contact_name: Mapped[str | None] = mapped_column(String(200))
+    primary_contact_email: Mapped[str | None] = mapped_column(String(200))
+    service_mode: Mapped[str | None] = mapped_column(String(50))
+    deployment_notes: Mapped[str | None] = mapped_column(Text)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    utilization_pct: Mapped[int | None] = mapped_column(Integer)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="profile")
+
+
+class GroupProfile(TimestampMixin, Base):
+    __tablename__ = "group_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id"), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    business_unit: Mapped[str | None] = mapped_column(String(100))
+    owner_name: Mapped[str | None] = mapped_column(String(200))
+
+    group: Mapped["Group"] = relationship(back_populates="profile")
 
 
 class UserTenantMembership(TimestampMixin, Base):
@@ -78,6 +110,7 @@ class UserTenantMembership(TimestampMixin, Base):
 
     tenant: Mapped["Tenant"] = relationship(back_populates="memberships")
     group_memberships: Mapped[list["UserGroupMembership"]] = relationship(back_populates="tenant_membership")
+    profile: Mapped["UserMembershipProfile | None"] = relationship(back_populates="membership", uselist=False)
 
 
 class UserGroupMembership(Base):
@@ -106,6 +139,55 @@ class AdminUser(TimestampMixin, Base):
         back_populates="admin_user",
         cascade="all, delete-orphan",
     )
+    profile: Mapped["AdminProfile | None"] = relationship(back_populates="admin_user", uselist=False)
+
+
+class UserMembershipProfile(TimestampMixin, Base):
+    __tablename__ = "user_membership_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_membership_id: Mapped[str] = mapped_column(ForeignKey("user_tenant_membership.id"), unique=True, index=True)
+    first_name: Mapped[str | None] = mapped_column(String(100))
+    last_name: Mapped[str | None] = mapped_column(String(100))
+    email: Mapped[str | None] = mapped_column(String(200))
+    title: Mapped[str | None] = mapped_column(String(100))
+    utilization_level: Mapped[str | None] = mapped_column(String(50))
+    sessions_count: Mapped[int] = mapped_column(Integer, default=0)
+    avg_improvement_pct: Mapped[int | None] = mapped_column(Integer)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    membership: Mapped["UserTenantMembership"] = relationship(back_populates="profile")
+
+
+class UserInvitation(TimestampMixin, Base):
+    __tablename__ = "user_invitations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id_hash: Mapped[str] = mapped_column(String(200), index=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    email: Mapped[str] = mapped_column(String(200), index=True)
+    invite_token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    invite_url: Mapped[str | None] = mapped_column(String(1000))
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    provider: Mapped[str | None] = mapped_column(String(50))
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    created_by_admin_user_id: Mapped[str | None] = mapped_column(ForeignKey("admin_users.id"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class AdminProfile(TimestampMixin, Base):
+    __tablename__ = "admin_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    admin_user_id: Mapped[str] = mapped_column(ForeignKey("admin_users.id"), unique=True, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(200))
+    email: Mapped[str | None] = mapped_column(String(200))
+
+    admin_user: Mapped["AdminUser"] = relationship(back_populates="profile")
 
 
 class AdminScope(Base):
@@ -143,6 +225,9 @@ class TenantLLMConfig(TimestampMixin, Base):
     endpoint_url: Mapped[str | None] = mapped_column(String(500))
     api_key_masked: Mapped[str | None] = mapped_column(String(32))
     secret_reference: Mapped[str | None] = mapped_column(String(255))
+    secret_source: Mapped[str] = mapped_column(String(30), default="none")
+    vault_provider: Mapped[str | None] = mapped_column(String(50))
+    platform_managed_config_id: Mapped[str | None] = mapped_column(String(36), index=True)
     credential_mode: Mapped[str] = mapped_column(String(30), default="customer_managed")
     credential_status: Mapped[str] = mapped_column(String(30), default="unvalidated", index=True)
     last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -217,3 +302,77 @@ class AdminAuditLog(Base):
     after_json: Mapped[str | None] = mapped_column(Text)
     request_id: Mapped[str | None] = mapped_column(String(100), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class DatabaseInstanceConfig(TimestampMixin, Base):
+    __tablename__ = "database_instance_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    label: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    db_kind: Mapped[str] = mapped_column(String(50), default="postgresql")
+    host: Mapped[str | None] = mapped_column(String(200))
+    database_name: Mapped[str | None] = mapped_column(String(200))
+    connection_string_masked: Mapped[str | None] = mapped_column(String(500))
+    connection_secret_reference: Mapped[str | None] = mapped_column(String(255))
+    secret_source: Mapped[str] = mapped_column(String(30), default="none")
+    vault_provider: Mapped[str | None] = mapped_column(String(50))
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    managed_via_db_only: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class PromptUiInstanceConfig(TimestampMixin, Base):
+    __tablename__ = "prompt_ui_instance_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    label: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    base_url: Mapped[str] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+
+class TenantPortalConfig(TimestampMixin, Base):
+    __tablename__ = "tenant_portal_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), unique=True, index=True)
+    portal_base_url: Mapped[str] = mapped_column(String(500))
+    logo_url: Mapped[str | None] = mapped_column(String(1000))
+    welcome_message: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_by_admin_user_id: Mapped[str | None] = mapped_column(ForeignKey("admin_users.id"), index=True)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="portal_config")
+
+
+class PlatformManagedLlmConfig(TimestampMixin, Base):
+    __tablename__ = "platform_managed_llm_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    label: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    provider_type: Mapped[str] = mapped_column(String(100))
+    model_name: Mapped[str] = mapped_column(String(200))
+    endpoint_url: Mapped[str | None] = mapped_column(String(500))
+    api_key_masked: Mapped[str | None] = mapped_column(String(32))
+    secret_reference: Mapped[str | None] = mapped_column(String(255))
+    secret_source: Mapped[str] = mapped_column(String(30), default="none")
+    vault_provider: Mapped[str | None] = mapped_column(String(50))
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class VaultSecret(TimestampMixin, Base):
+    __tablename__ = "vault_secrets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    secret_ref: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    provider_type: Mapped[str] = mapped_column(String(50), index=True)
+    scope_type: Mapped[str] = mapped_column(String(50), index=True)
+    scope_id: Mapped[str] = mapped_column(String(200), index=True)
+    secret_kind: Mapped[str] = mapped_column(String(50), index=True)
+    display_name: Mapped[str | None] = mapped_column(String(200))
+    secret_masked: Mapped[str | None] = mapped_column(String(64))
+    ciphertext: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_by_admin_user_id: Mapped[str | None] = mapped_column(ForeignKey("admin_users.id"), index=True)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

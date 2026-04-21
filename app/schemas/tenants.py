@@ -19,6 +19,12 @@ class TenantBase(BaseModel):
     plan_tier: str | None = None
     reporting_timezone: str = "America/New_York"
     external_customer_id: str | None = None
+    organization_type: str | None = None
+    industry: str | None = None
+    primary_contact_name: str | None = None
+    primary_contact_email: str | None = None
+    service_mode: str | None = None
+    deployment_notes: str | None = None
 
 
 class TenantCreate(TenantBase):
@@ -33,6 +39,12 @@ class TenantUpdate(BaseModel):
     plan_tier: str | None = None
     reporting_timezone: str | None = None
     external_customer_id: str | None = None
+    organization_type: str | None = None
+    industry: str | None = None
+    primary_contact_name: str | None = None
+    primary_contact_email: str | None = None
+    service_mode: str | None = None
+    deployment_notes: str | None = None
 
 
 class Tenant(TenantBase):
@@ -41,12 +53,36 @@ class Tenant(TenantBase):
     updated_at: datetime
 
 
+class TenantProfile(BaseModel):
+    organization_type: str | None = None
+    industry: str | None = None
+    primary_contact_name: str | None = None
+    primary_contact_email: str | None = None
+    service_mode: str | None = None
+    deployment_notes: str | None = None
+    last_activity_at: datetime | None = None
+    utilization_pct: int | None = None
+
+
+class TenantPortalConfig(BaseModel):
+    id: UUID | None = None
+    portal_base_url: str
+    logo_url: str | None = None
+    welcome_message: str | None = None
+    is_active: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class TenantLLMConfig(BaseModel):
     provider_type: str = Field(min_length=1, max_length=100)
     model_name: str = Field(min_length=1, max_length=200)
     endpoint_url: str | None = None
     api_key_masked: str | None = None
     secret_reference: str | None = None
+    secret_source: Literal["vault_managed", "external_reference", "none"] = "none"
+    vault_provider: str | None = None
+    platform_managed_config_id: str | None = None
     credential_mode: CredentialMode = "customer_managed"
     credential_status: CredentialStatus = "unvalidated"
     transformation_enabled: bool = True
@@ -61,6 +97,7 @@ class TenantLLMConfigUpdate(BaseModel):
     endpoint_url: str | None = None
     api_key: str | None = None
     secret_reference: str | None = None
+    platform_managed_config_id: str | None = None
     credential_mode: CredentialMode = "customer_managed"
     transformation_enabled: bool = True
     scoring_enabled: bool = True
@@ -82,6 +119,8 @@ class TenantRuntimeSettingsUpdate(TenantRuntimeSettings):
 
 class TenantSummary(BaseModel):
     tenant: Tenant
+    profile: TenantProfile | None = None
+    portal_config: TenantPortalConfig | None = None
     llm_config: TenantLLMConfig | None = None
     runtime_settings: TenantRuntimeSettings | None = None
 
