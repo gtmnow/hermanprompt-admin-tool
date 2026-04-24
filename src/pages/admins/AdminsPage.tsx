@@ -108,6 +108,19 @@ function sortGroupsByName(groups: Group[]) {
   return [...groups].sort((left, right) => left.group_name.localeCompare(right.group_name));
 }
 
+const permissionGridStyle = {
+  display: "grid",
+  gap: 20,
+  gridTemplateColumns: "repeat(2, minmax(220px, 1fr))",
+} as const;
+
+const permissionOptionStyle = {
+  alignItems: "center",
+  display: "flex",
+  fontSize: "1.1rem",
+  gap: 14,
+} as const;
+
 export function AdminsPage() {
   const { session } = useAuth();
   const queryClient = useQueryClient();
@@ -507,9 +520,9 @@ export function AdminsPage() {
 
           <div>
             <div className="field-label">Permissions</div>
-            <div className="stack" style={{ gap: 10 }}>
+            <div style={permissionGridStyle}>
               {permissionCatalog.map((permission) => (
-                <label key={permission} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <label key={permission} style={permissionOptionStyle}>
                   <input
                     checked={tenantAdminPermissions.includes(permission)}
                     onChange={() => toggleTenantAdminPermission(permission)}
@@ -628,9 +641,9 @@ export function AdminsPage() {
 
             <div>
               <div className="field-label">Permissions</div>
-              <div className="stack" style={{ gap: 10 }}>
+              <div style={permissionGridStyle}>
                 {permissionCatalog.map((permission) => (
-                  <label key={permission} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <label key={permission} style={permissionOptionStyle}>
                     <input
                       checked={superAdminPermissions.includes(permission)}
                       onChange={() => toggleSuperAdminPermission(permission)}
@@ -830,9 +843,9 @@ export function AdminsPage() {
 
               <div>
                 <div className="field-label">Permissions</div>
-                <div className="stack" style={{ gap: 10 }}>
+                <div style={permissionGridStyle}>
                   {permissionCatalog.map((permission) => (
-                    <label key={permission} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <label key={permission} style={permissionOptionStyle}>
                       <input
                         checked={adminEditForm.permissions.includes(permission)}
                         onChange={() => togglePermission(permission)}
