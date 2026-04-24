@@ -257,10 +257,11 @@ def list_tenants(
         mapped_snapshot_ids.add(tenant.id)
         mapped_snapshot_ids.add(tenant.tenant_key)
 
-    for snapshot_tenant_id in get_snapshot_tenant_ids(db):
-        if snapshot_tenant_id in mapped_snapshot_ids:
-            continue
-        items.append(snapshot_summary(db, snapshot_tenant_id))
+    if principal.role in {"super_admin", "support_admin"}:
+        for snapshot_tenant_id in get_snapshot_tenant_ids(db):
+            if snapshot_tenant_id in mapped_snapshot_ids:
+                continue
+            items.append(snapshot_summary(db, snapshot_tenant_id))
 
     start = (page - 1) * page_size
     end = start + page_size
