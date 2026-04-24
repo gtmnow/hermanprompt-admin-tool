@@ -2,7 +2,7 @@ import { Bell, Building2, ChevronDown } from "lucide-react";
 
 import { useAuth } from "../../app/providers/AuthProvider";
 import { useOrganizationScope } from "../../app/providers/OrganizationScopeProvider";
-import logoUrl from "../../../docs/herman_admin_demo_with_logo/assets/AI_confident_logo.png";
+import logoUrl from "../../assets/AI_confident_logo.png";
 
 function initialsFor(displayName: string | null | undefined, fallback: string) {
   const source = displayName?.trim() || fallback.trim() || "Admin User";
