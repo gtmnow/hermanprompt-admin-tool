@@ -12,6 +12,10 @@ class Base(DeclarativeBase):
 
 
 settings = get_settings()
+if not settings.database_url:
+    raise RuntimeError(
+        "HERMAN_ADMIN_DATABASE_URL is required. Refusing to start without an explicit database configuration."
+    )
 
 if settings.database_url.startswith("sqlite:///"):
     db_path = settings.database_url.removeprefix("sqlite:///")

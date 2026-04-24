@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_v1_prefix: str = "/api/v1"
     debug: bool = False
-    database_url: str = "sqlite:///./data/herman_admin.db"
+    database_url: str | None = None
     bootstrap_schema: bool = True
     seed_demo_data: bool = True
     default_page_size: int = Field(default=25, ge=1, le=250)

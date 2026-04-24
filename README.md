@@ -167,7 +167,10 @@ npm install
 Start the API and frontend against a local development database:
 
 ```bash
-HERMAN_ADMIN_BOOTSTRAP_SCHEMA=true HERMAN_ADMIN_SEED_DEMO_DATA=true uvicorn app.main:app --reload --host 127.0.0.1 --port 8011
+HERMAN_ADMIN_DATABASE_URL=sqlite:///./data/herman_admin.db \
+HERMAN_ADMIN_BOOTSTRAP_SCHEMA=true \
+HERMAN_ADMIN_SEED_DEMO_DATA=true \
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8011
 npm run dev
 ```
 
