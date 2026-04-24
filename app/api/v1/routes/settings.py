@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import DatabaseInstanceConfig, PlatformManagedLlmConfig, PromptUiInstanceConfig
+from app.models import DatabaseInstanceConfig, PlatformManagedLlmConfig, PromptUiInstanceConfig, ResellerPartner, ResellerTenantDefaults, ServiceTierDefinition, Tenant
 from app.schemas import (
     DatabaseInstanceConfigCreate,
     DatabaseInstanceConfigSummary,
@@ -17,16 +17,187 @@ from app.schemas import (
     PromptUiInstanceConfigUpdate,
     ResourceEnvelope,
     SecretVaultStatusSummary,
+    ServiceTierDefinitionCreate,
+    ServiceTierDefinitionSummary,
+    ServiceTierDefinitionUpdate,
 )
 from app.security import Principal, require_permission, require_super_admin
 from app.secret_vault import get_vault_status, mask_connection_string, resolve_secret_reference, store_managed_secret
-from app.services import ensure_additive_schema_extensions, serialize_model, write_audit_log
+from app.services import ensure_additive_schema_extensions, serialize_model, validate_reseller_capacity, write_audit_log
 
 router = APIRouter()
 
 
 def to_platform_llm_summary(record: PlatformManagedLlmConfig) -> PlatformManagedLlmConfigSummary:
     return PlatformManagedLlmConfigSummary.model_validate(record, from_attributes=True)
+
+
+def to_service_tier_summary(record: ServiceTierDefinition) -> ServiceTierDefinitionSummary:
+    return ServiceTierDefinitionSummary.model_validate(record, from_attributes=True)
+
+
+@router.get("/service-tiers", response_model=ListEnvelope[ServiceTierDefinitionSummary])
+def list_service_tiers(
+    scope_type: str | None = Query(default=None),
+    include_inactive: bool = Query(default=False),
+    principal: Principal = Depends(require_permission("tenants.read")),
+    db: Session = Depends(get_db),
+) -> ListEnvelope[ServiceTierDefinitionSummary]:
+    ensure_additive_schema_extensions()
+    query = select(ServiceTierDefinition).order_by(
+        ServiceTierDefinition.scope_type.asc(),
+        ServiceTierDefinition.sort_order.asc(),
+        ServiceTierDefinition.tier_name.asc(),
+    )
+    if scope_type:
+        query = query.where(ServiceTierDefinition.scope_type == scope_type)
+    if include_inactive:
+        if principal.role != "super_admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access is required")
+    else:
+        query = query.where(ServiceTierDefinition.is_active.is_(True))
+    items = [to_service_tier_summary(item) for item in db.scalars(query)]
+    return ListEnvelope[ServiceTierDefinitionSummary](
+        items=items,
+        page=1,
+        page_size=len(items) or 1,
+        total_count=len(items),
+        filters={"scope_type": scope_type, "include_inactive": include_inactive},
+    )
+
+
+@router.post("/service-tiers", response_model=ResourceEnvelope[ServiceTierDefinitionSummary], status_code=status.HTTP_201_CREATED)
+def create_service_tier(
+    payload: ServiceTierDefinitionCreate,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[ServiceTierDefinitionSummary]:
+    ensure_additive_schema_extensions()
+    existing = db.scalar(
+        select(ServiceTierDefinition).where(
+            ServiceTierDefinition.scope_type == payload.scope_type,
+            ServiceTierDefinition.tier_key == payload.tier_key,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A tier with this key already exists in that scope")
+    record = ServiceTierDefinition(**payload.model_dump())
+    db.add(record)
+    db.flush()
+    write_audit_log(
+        db,
+        principal,
+        action_type="settings.service_tier.create",
+        target_type="service_tier_definition",
+        target_id=record.id,
+        after=serialize_model(record),
+        request_id=request_id,
+    )
+    db.commit()
+    db.refresh(record)
+    return ResourceEnvelope[ServiceTierDefinitionSummary](resource=to_service_tier_summary(record), updated_at=record.updated_at)
+
+
+@router.patch("/service-tiers/{tier_id}", response_model=ResourceEnvelope[ServiceTierDefinitionSummary])
+def update_service_tier(
+    tier_id: str,
+    payload: ServiceTierDefinitionUpdate,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[ServiceTierDefinitionSummary]:
+    ensure_additive_schema_extensions()
+    record = db.get(ServiceTierDefinition, tier_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service tier not found")
+    before = serialize_model(record)
+    updates = payload.model_dump(exclude_none=True)
+    for key, value in updates.items():
+        setattr(record, key, value)
+    if record.scope_type == "organization":
+        record.max_organizations = None
+    if record.has_unlimited_users:
+        record.max_users = None
+    elif record.max_users is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide a max user count or mark the tier as unlimited")
+    if record.scope_type == "reseller":
+        for reseller in db.scalars(select(ResellerPartner).where(ResellerPartner.service_tier_definition_id == record.id)):
+            validate_reseller_capacity(db, reseller, candidate_tier=record)
+    write_audit_log(
+        db,
+        principal,
+        action_type="settings.service_tier.update",
+        target_type="service_tier_definition",
+        target_id=record.id,
+        before=before,
+        after=serialize_model(record),
+        request_id=request_id,
+    )
+    db.commit()
+    db.refresh(record)
+    return ResourceEnvelope[ServiceTierDefinitionSummary](resource=to_service_tier_summary(record), updated_at=record.updated_at)
+
+
+@router.delete("/service-tiers/{tier_id}", response_model=ResourceEnvelope[ServiceTierDefinitionSummary])
+def delete_service_tier(
+    tier_id: str,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[ServiceTierDefinitionSummary]:
+    ensure_additive_schema_extensions()
+    record = db.get(ServiceTierDefinition, tier_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service tier not found")
+
+    active_reseller = db.scalar(
+        select(ResellerPartner).where(
+            ResellerPartner.service_tier_definition_id == tier_id,
+            ResellerPartner.is_active.is_(True),
+        )
+    )
+    if active_reseller is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{record.tier_name} is still assigned to active reseller {active_reseller.reseller_name}",
+        )
+
+    active_tenant = db.scalar(
+        select(Tenant).where(
+            Tenant.service_tier_definition_id == tier_id,
+            Tenant.status == "active",
+        )
+    )
+    if active_tenant is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{record.tier_name} is still assigned to active organization {active_tenant.tenant_name}",
+        )
+
+    for reseller in db.scalars(select(ResellerPartner).where(ResellerPartner.service_tier_definition_id == tier_id)):
+        reseller.service_tier_definition_id = None
+    for defaults in db.scalars(select(ResellerTenantDefaults).where(ResellerTenantDefaults.default_service_tier_definition_id == tier_id)):
+        defaults.default_service_tier_definition_id = None
+        defaults.default_plan_tier = None
+    for tenant in db.scalars(select(Tenant).where(Tenant.service_tier_definition_id == tier_id)):
+        tenant.service_tier_definition_id = None
+        tenant.plan_tier = None
+
+    before = serialize_model(record)
+    summary = to_service_tier_summary(record)
+    db.delete(record)
+    write_audit_log(
+        db,
+        principal,
+        action_type="settings.service_tier.delete",
+        target_type="service_tier_definition",
+        target_id=tier_id,
+        before=before,
+        request_id=request_id,
+    )
+    db.commit()
+    return ResourceEnvelope[ServiceTierDefinitionSummary](resource=summary, updated_at=summary.updated_at)
 
 
 @router.get("/secret-vault", response_model=ResourceEnvelope[SecretVaultStatusSummary])

@@ -30,6 +30,30 @@ export function ActivationLandingPage() {
       }));
   }, [onboardingQuery.data, tenantsQuery.data]);
 
+  const onboardingProgress = (item: (typeof draftItems)[number]) => {
+    const checks = [
+      item.onboarding?.tenant_created,
+      item.onboarding?.llm_configured,
+      item.onboarding?.llm_validated,
+      item.onboarding?.groups_created,
+      item.onboarding?.users_uploaded,
+      item.onboarding?.admin_assigned,
+    ];
+    const complete = checks.filter(Boolean).length;
+    return Math.round((complete / checks.length) * 100);
+  };
+
+  const blockerSummary = (item: (typeof draftItems)[number]) => {
+    const blockers = [
+      !item.onboarding?.llm_configured ? "LLM config" : null,
+      !item.onboarding?.llm_validated ? "Validation" : null,
+      !item.onboarding?.groups_created ? "Groups" : null,
+      !item.onboarding?.users_uploaded ? "Users" : null,
+      !item.onboarding?.admin_assigned ? "Admins" : null,
+    ].filter(Boolean);
+    return blockers.length === 0 ? "Ready to activate" : blockers.join(", ");
+  };
+
   if (tenantsQuery.isLoading || onboardingQuery.isLoading) {
     return <LoadingBlock label="Loading activation workspace..." />;
   }
@@ -82,8 +106,10 @@ export function ActivationLandingPage() {
             <thead>
               <tr>
                 <th>Organization</th>
+                <th>Progress</th>
                 <th>Tenant status</th>
                 <th>Onboarding</th>
+                <th>Blockers</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -94,10 +120,12 @@ export function ActivationLandingPage() {
                     <strong>{item.tenant.tenant.tenant_name}</strong>
                     <div className="muted">{item.tenant.tenant.tenant_key}</div>
                   </td>
+                  <td>{onboardingProgress(item)}%</td>
                   <td><StatusBadge value={item.tenant.tenant.status} /></td>
                   <td>
                     <StatusBadge value={item.onboarding?.onboarding_status ?? "draft"} />
                   </td>
+                  <td>{blockerSummary(item)}</td>
                   <td>
                     <Link className="secondary-button activation-action-button" to={`/activation/${item.tenant.tenant.id}`}>
                       Resume

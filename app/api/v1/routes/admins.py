@@ -10,6 +10,7 @@ from app.security import Principal, require_permission
 from app.services import (
     ensure_scope_access,
     get_admin_or_404,
+    generate_internal_user_id_hash,
     refresh_onboarding_state,
     serialize_model,
     upsert_admin_profile,
@@ -75,7 +76,8 @@ def create_admin(
     principal: Principal = Depends(require_permission("admins.create")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[AdminUserSummary]:
-    admin = AdminUser(user_id_hash=payload.user_id_hash, role=payload.role, is_active=True)
+    resolved_user_id_hash = payload.user_id_hash or generate_internal_user_id_hash(payload.email)
+    admin = AdminUser(user_id_hash=resolved_user_id_hash, role=payload.role, is_active=True)
     db.add(admin)
     db.flush()
     upsert_admin_profile(db, admin, payload.model_dump(mode="json"))

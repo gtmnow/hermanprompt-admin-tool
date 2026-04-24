@@ -1,4 +1,11 @@
 from app.schemas.admins import AdminCreate, AdminProfileSummary, AdminUpdate, AdminUserSummary
+from app.schemas.auth import (
+    AdminSessionSummary,
+    AuthenticatedAdminPrincipal,
+    AuthSessionResponse,
+    LaunchExchangeRequest,
+    LogoutResponse,
+)
 from app.schemas.audit import AuditLogEntry
 from app.schemas.common import ListEnvelope, ResourceEnvelope
 from app.schemas.groups import Group, GroupCreate, GroupProfile, GroupUpdate
@@ -22,11 +29,24 @@ from app.schemas.settings import (
     PromptUiInstanceConfigUpdate,
     SecretVaultStatusSummary,
 )
-from app.schemas.resellers import ResellerPartner, ResellerPartnerCreate, ResellerPartnerUpdate
+from app.schemas.service_tiers import (
+    ServiceTierDefinitionCreate,
+    ServiceTierDefinitionSummary,
+    ServiceTierDefinitionUpdate,
+)
+from app.schemas.resellers import (
+    ResellerPartner,
+    ResellerPartnerCreate,
+    ResellerPartnerUpdate,
+    ResellerTenantDefaultsSummary,
+    ResellerTenantDefaultsUpdate,
+)
 from app.schemas.system import SystemOverview
 from app.schemas.tenants import (
     Tenant,
     TenantCreate,
+    TenantLifecycleActionRequest,
+    TenantLifecycleActionResult,
     TenantLLMConfig,
     TenantLLMConfigUpdate,
     TenantPortalConfig,
@@ -48,8 +68,11 @@ from app.schemas.users import (
 __all__ = [
     "AdminCreate",
     "AdminProfileSummary",
+    "AdminSessionSummary",
     "AdminUpdate",
     "AdminUserSummary",
+    "AuthenticatedAdminPrincipal",
+    "AuthSessionResponse",
     "AuditLogEntry",
     "DatabaseInstanceConfigCreate",
     "DatabaseInstanceConfigSummary",
@@ -60,6 +83,7 @@ __all__ = [
     "PromptUiInstanceConfigCreate",
     "PromptUiInstanceConfigSummary",
     "PromptUiInstanceConfigUpdate",
+    "LaunchExchangeRequest",
     "SecretVaultStatusSummary",
     "Group",
     "GroupCreate",
@@ -74,10 +98,18 @@ __all__ = [
     "ResellerPartner",
     "ResellerPartnerCreate",
     "ResellerPartnerUpdate",
+    "ResellerTenantDefaultsSummary",
+    "ResellerTenantDefaultsUpdate",
     "ResourceEnvelope",
+    "LogoutResponse",
+    "ServiceTierDefinitionCreate",
+    "ServiceTierDefinitionSummary",
+    "ServiceTierDefinitionUpdate",
     "SystemOverview",
     "Tenant",
     "TenantCreate",
+    "TenantLifecycleActionRequest",
+    "TenantLifecycleActionResult",
     "TenantLLMConfig",
     "TenantLLMConfigUpdate",
     "TenantPortalConfig",

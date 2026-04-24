@@ -1,12 +1,14 @@
 import json
 from datetime import timezone, datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import ReportExportJob
 from app.schemas import (
+    ListEnvelope,
     ReportExportJobSummary,
     ReportExportRequest,
     ReportFilterSet,
@@ -93,13 +95,10 @@ def create_report_export(
     db.add(job)
     db.flush()
 
-    if payload.format == "csv":
-        metrics = build_report_payload(db, payload.dimension, payload.scope_id, payload.start_date, payload.end_date)
-        job.file_path = create_export_file(job, metrics)
-        job.status = "complete"
-        job.completed_at = datetime.now(timezone.utc)
-    else:
-        job.status = "queued"
+    metrics = build_report_payload(db, payload.dimension, payload.scope_id, payload.start_date, payload.end_date)
+    job.file_path = create_export_file(job, metrics)
+    job.status = "complete"
+    job.completed_at = datetime.now(timezone.utc)
 
     write_audit_log(
         db,
@@ -114,6 +113,45 @@ def create_report_export(
     return ResourceEnvelope[ReportExportJobSummary](
         resource=ReportExportJobSummary.model_validate(job, from_attributes=True),
         updated_at=job.completed_at or job.created_at,
+    )
+
+
+@router.get("/export", response_model=ListEnvelope[ReportExportJobSummary])
+def list_report_exports(
+    scope_type: str | None = Query(default=None),
+    scope_id: str | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    principal: Principal = Depends(require_permission("analytics.export")),
+    db: Session = Depends(get_db),
+) -> ListEnvelope[ReportExportJobSummary]:
+    query = select(ReportExportJob).order_by(ReportExportJob.created_at.desc())
+    if scope_type:
+        query = query.where(ReportExportJob.scope_type == scope_type)
+    if scope_id:
+        query = query.where(ReportExportJob.scope_id == scope_id)
+    if status_filter:
+        query = query.where(ReportExportJob.status == status_filter)
+
+    items = []
+    for job in db.scalars(query):
+        ensure_scope_access(
+            principal,
+            reseller_partner_id=job.scope_id if job.scope_type == "reseller" else None,
+            tenant_id=job.scope_id if job.scope_type == "organization" else None,
+            group_id=job.scope_id if job.scope_type == "group" else None,
+        )
+        items.append(ReportExportJobSummary.model_validate(job, from_attributes=True))
+
+    start = (page - 1) * page_size
+    end = start + page_size
+    return ListEnvelope[ReportExportJobSummary](
+        items=items[start:end],
+        page=page,
+        page_size=page_size,
+        total_count=len(items),
+        filters={"scope_type": scope_type, "scope_id": scope_id, "status": status_filter},
     )
 
 

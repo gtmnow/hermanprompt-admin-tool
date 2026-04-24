@@ -1,9 +1,10 @@
-import { Shield, BarChart3, Building2, Cog, FileDown, Gauge, Rocket, Server, Users, UserCog, Layers3 } from "lucide-react";
+import { Shield, BarChart3, Building2, Cog, FileDown, Gauge, Rocket, Server, Tags, Users, UserCog, Layers3, Handshake } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: Gauge },
   { to: "/activation", label: "Activation", icon: Rocket },
+  { to: "/resellers", label: "Resellers", icon: Handshake },
   { to: "/orgs", label: "Organizations", icon: Building2 },
   { to: "/users", label: "Users", icon: Users },
   { to: "/groups", label: "Groups", icon: Layers3 },
@@ -11,6 +12,7 @@ const navItems = [
   { to: "/reports", label: "Reporting", icon: BarChart3 },
   { to: "/operations", label: "Operations", icon: Server },
   { to: "/exports", label: "Exports", icon: FileDown },
+  { to: "/tiers", label: "Service Tiers", icon: Tags },
   { to: "/settings", label: "Settings", icon: Cog },
 ];
 

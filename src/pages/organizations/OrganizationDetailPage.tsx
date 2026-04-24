@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
-import { useQuery } from "@tanstack/react-query";
-import { Link, NavLink, Outlet, useLocation, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { SimpleTrendChart } from "../../components/charts/SimpleTrendChart";
@@ -13,6 +13,7 @@ import {
 } from "../../features/dashboard/api";
 import { tenantApi } from "../../features/tenants/api";
 import { formatDateTime } from "../../lib/format";
+import type { TenantLifecycleAction } from "../../lib/types";
 
 const detailTabs = [
   { label: "Overview", suffix: "" },
@@ -28,7 +29,11 @@ const detailTabs = [
 export function OrganizationDetailPage() {
   const { tenantId = "" } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [rangeKey, setRangeKey] = useState<DashboardRangeKey>("30d");
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<TenantLifecycleAction | null>(null);
 
   const tenantQuery = useQuery({
     queryKey: ["tenant", tenantId],
@@ -66,6 +71,46 @@ export function OrganizationDetailPage() {
       admin.scopes.some((scope) => scope.tenant_id === tenantId),
     );
   }, [adminsQuery.data, tenantId]);
+
+  const tenantActionMutation = useMutation({
+    mutationFn: (action: TenantLifecycleAction) => tenantApi.runTenantAction(tenantId, action),
+    onSuccess: async (result, action) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["tenant", tenantId] }),
+        queryClient.invalidateQueries({ queryKey: ["tenant-users", tenantId] }),
+        queryClient.invalidateQueries({ queryKey: ["tenant-onboarding", tenantId] }),
+        queryClient.invalidateQueries({ queryKey: ["tenants"] }),
+        queryClient.invalidateQueries({ queryKey: ["users"] }),
+        queryClient.invalidateQueries({ queryKey: ["activation-tenant", tenantId] }),
+      ]);
+      setPendingAction(null);
+      setStatusDialogOpen(false);
+      if (action === "delete") {
+        navigate("/orgs");
+        return;
+      }
+      if (action === "reset") {
+        navigate(`/activation/${tenantId}`);
+      }
+      window.alert(result.resource.message);
+    },
+  });
+
+  function closeStatusDialog() {
+    setStatusDialogOpen(false);
+    setPendingAction(null);
+    tenantActionMutation.reset();
+  }
+
+  function actionDescription(action: TenantLifecycleAction) {
+    if (action === "inactivate") {
+      return "Set this organization to inactive and disable login access for all of its users.";
+    }
+    if (action === "reset") {
+      return "Move this organization back to onboarding, disable all user logins, and require re-invitation through Activation.";
+    }
+    return "Permanently remove this organization and its users from the database.";
+  }
 
   if (
     tenantQuery.isLoading ||
@@ -114,7 +159,9 @@ export function OrganizationDetailPage() {
           <Link className="secondary-button" to={`/activation/${tenantId}`}>
             Edit setup
           </Link>
-          <StatusBadge value={tenant.tenant.status} />
+          <button className="org-detail__status-button" type="button" onClick={() => setStatusDialogOpen(true)}>
+            <StatusBadge value={tenant.tenant.status} />
+          </button>
           {tenant.llm_config ? <StatusBadge value={tenant.llm_config.credential_status} /> : null}
         </div>
       </div>
@@ -211,8 +258,8 @@ export function OrganizationDetailPage() {
                 </div>
               </div>
               <div className="key-value">
-                <div className="muted">Plan tier</div>
-                <div>{tenant.tenant.plan_tier ?? "Not set"}</div>
+                <div className="muted">Service tier</div>
+                <div>{tenant.service_tier?.tier_name ?? tenant.tenant.plan_tier ?? "Not set"}</div>
               </div>
               <div className="key-value">
                 <div className="muted">Organization type</div>
@@ -286,8 +333,8 @@ export function OrganizationDetailPage() {
                           <td>
                             {user.profile?.first_name || user.profile?.last_name
                               ? `${user.profile?.first_name ?? ""} ${user.profile?.last_name ?? ""}`.trim()
-                              : user.user_id_hash}
-                            <div className="muted">{user.profile?.email ?? user.user_id_hash}</div>
+                              : "Unnamed user"}
+                            <div className="muted">{user.profile?.email ?? "No email on file"}</div>
                           </td>
                           <td>
                             <StatusBadge value={user.status} />
@@ -338,6 +385,82 @@ export function OrganizationDetailPage() {
           }}
         />
       )}
+
+      {statusDialogOpen ? (
+        <div className="dialog-backdrop" role="presentation" onClick={closeStatusDialog}>
+          <div
+            className="dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tenant-status-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="split-header">
+              <div>
+                <h3 className="panel-title" id="tenant-status-dialog-title">Manage Organization Status</h3>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  {tenant.tenant.tenant_name} is currently {tenant.tenant.status}.
+                </div>
+              </div>
+              <button className="ghost-button" type="button" onClick={closeStatusDialog}>
+                Close
+              </button>
+            </div>
+
+            {tenantActionMutation.error ? (
+              <div className="section-note section-note--danger" style={{ marginTop: 14 }}>
+                {tenantActionMutation.error instanceof Error ? tenantActionMutation.error.message : "Unable to update organization status."}
+              </div>
+            ) : null}
+
+            {pendingAction ? (
+              <>
+                <div className="section-note" style={{ marginTop: 18 }}>
+                  {actionDescription(pendingAction)}
+                </div>
+                <div className="dialog-actions">
+                  <button
+                    className={pendingAction === "delete" ? "secondary-button users-page__danger-button" : "primary-button"}
+                    disabled={tenantActionMutation.isPending}
+                    onClick={() => tenantActionMutation.mutate(pendingAction)}
+                    type="button"
+                  >
+                    {tenantActionMutation.isPending ? "Processing..." : `Confirm ${pendingAction}`}
+                  </button>
+                  <button
+                    className="ghost-button"
+                    disabled={tenantActionMutation.isPending}
+                    onClick={() => {
+                      setPendingAction(null);
+                      tenantActionMutation.reset();
+                    }}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="stack" style={{ marginTop: 18 }}>
+                <div className="section-note">
+                  Choose the lifecycle action to apply to this organization. Reset returns the org to onboarding. Reactivation happens from the Activation workflow.
+                </div>
+                <div className="dialog-actions">
+                  <button className="secondary-button" type="button" onClick={() => setPendingAction("inactivate")}>
+                    Inactivate
+                  </button>
+                  <button className="secondary-button" type="button" onClick={() => setPendingAction("reset")}>
+                    Reset
+                  </button>
+                  <button className="secondary-button users-page__danger-button" type="button" onClick={() => setPendingAction("delete")}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

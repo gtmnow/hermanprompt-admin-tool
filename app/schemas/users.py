@@ -10,10 +10,11 @@ UserLifecycleAction = Literal["deactivate", "reinvite", "delete"]
 
 
 class UserMembershipCreate(BaseModel):
-    user_id_hash: str = Field(min_length=1, max_length=200)
+    user_id_hash: str | None = Field(default=None, min_length=1, max_length=200)
     tenant_id: UUID
     group_ids: list[UUID] = Field(default_factory=list)
     status: UserStatus = "invited"
+    send_invite: bool = True
     is_primary: bool = True
     first_name: str | None = None
     last_name: str | None = None

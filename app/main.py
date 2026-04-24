@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.auth import router as auth_router
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.db import Base, engine, SessionLocal
@@ -19,6 +20,7 @@ app = FastAPI(
 )
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 
 
 @app.on_event("startup")

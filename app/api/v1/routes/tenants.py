@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -16,12 +17,15 @@ from app.schemas import (
     ResourceEnvelope,
     Tenant as TenantSchema,
     TenantCreate,
+    TenantLifecycleActionRequest,
+    TenantLifecycleActionResult,
     TenantLLMConfig as TenantLLMConfigSchema,
     TenantLLMConfigUpdate,
     TenantPortalConfig as TenantPortalConfigSchema,
     TenantProfile as TenantProfileSchema,
     TenantRuntimeSettings as TenantRuntimeSettingsSchema,
     TenantRuntimeSettingsUpdate,
+    ServiceTierDefinitionSummary,
     TenantSummary,
     TenantUpdate,
     TenantValidationResult,
@@ -29,23 +33,37 @@ from app.schemas import (
 from app.security import Principal, require_permission
 from app.secret_vault import resolve_secret_reference, store_managed_secret
 from app.services import (
+    apply_reseller_defaults_to_tenant,
+    delete_tenant_and_users,
     ensure_additive_schema_extensions,
     ensure_scope_access,
+    generate_tenant_key,
+    get_service_tier_or_404,
+    get_or_create_reseller_defaults,
+    get_reseller_or_404,
     get_tenant_or_404,
     get_snapshot_tenant_ids,
     get_snapshot_tenant_metrics,
+    inactivate_tenant_state,
     mask_api_key,
     refresh_onboarding_state,
+    reset_tenant_state,
     serialize_model,
+    sync_tenant_service_tier_fields,
     table_exists,
     upsert_tenant_portal_config,
     upsert_tenant_profile,
     validate_activation_readiness,
+    validate_reseller_capacity,
     write_audit_log,
 )
 
 router = APIRouter()
 settings = get_settings()
+
+
+class ActivationOverrideRequest(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
 
 
 def normalize_secret_source(value: str | None) -> str:
@@ -118,6 +136,11 @@ def to_summary(db: Session, tenant: Tenant) -> TenantSummary:
 
     return TenantSummary(
         tenant=to_tenant_schema(tenant),
+        service_tier=(
+            ServiceTierDefinitionSummary.model_validate(tenant.service_tier, from_attributes=True)
+            if tenant.service_tier is not None
+            else None
+        ),
         profile=profile,
         portal_config=to_portal_schema(tenant),
         llm_config=to_llm_schema(tenant.llm_config),
@@ -254,8 +277,11 @@ def create_tenant(
 ) -> ResourceEnvelope[TenantSummary]:
     ensure_additive_schema_extensions()
     payload_data = payload.model_dump(mode="json")
+    reseller_defaults = None
     if payload.reseller_partner_id:
         ensure_scope_access(principal, reseller_partner_id=str(payload.reseller_partner_id))
+        reseller = get_reseller_or_404(db, str(payload.reseller_partner_id))
+        reseller_defaults = get_or_create_reseller_defaults(db, reseller)
 
     tenant_fields = {
         key: value
@@ -270,14 +296,30 @@ def create_tenant(
             "deployment_notes",
         }
     }
+    tenant_fields["tenant_key"] = payload.tenant_key or generate_tenant_key(db, payload.tenant_name)
     tenant = Tenant(**tenant_fields)
+    requested_tier = None
+    if payload.service_tier_definition_id:
+        requested_tier = get_service_tier_or_404(
+            db,
+            str(payload.service_tier_definition_id),
+            scope_type="organization",
+            require_active=True,
+        )
+        sync_tenant_service_tier_fields(tenant, requested_tier)
     db.add(tenant)
     db.flush()
     upsert_tenant_profile(db, tenant, payload_data)
 
-    runtime = TenantRuntimeSettings(tenant_id=tenant.id)
+    apply_reseller_defaults_to_tenant(db, tenant, reseller_defaults, default_portal_base_url=settings.default_portal_base_url)
+    effective_tier = requested_tier or tenant.service_tier
+    sync_tenant_service_tier_fields(tenant, effective_tier)
+    if tenant.reseller_partner is not None:
+        validate_reseller_capacity(db, tenant.reseller_partner, tenant_to_include=tenant, tenant_tier_override=effective_tier)
+
+    if tenant.runtime_settings is None:
+        db.add(TenantRuntimeSettings(tenant_id=tenant.id))
     onboarding = TenantOnboardingStatus(tenant_id=tenant.id, tenant_created=True, onboarding_status="draft")
-    db.add(runtime)
     db.add(onboarding)
     write_audit_log(
         db,
@@ -291,6 +333,99 @@ def create_tenant(
     db.commit()
     db.refresh(tenant)
     return ResourceEnvelope[TenantSummary](resource=to_summary(db, tenant), updated_at=tenant.updated_at)
+
+
+@router.post("/{tenant_id}/actions", response_model=ResourceEnvelope[TenantLifecycleActionResult])
+def run_tenant_lifecycle_action(
+    tenant_id: str,
+    payload: TenantLifecycleActionRequest,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_permission("tenants.write")),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[TenantLifecycleActionResult]:
+    ensure_additive_schema_extensions()
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:
+        if payload.action == "delete":
+            return ResourceEnvelope[TenantLifecycleActionResult](
+                resource=TenantLifecycleActionResult(
+                    tenant_id=tenant_id,
+                    action=payload.action,
+                    resulting_status="deleted",
+                    message="Organization was already removed.",
+                )
+            )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    before = serialize_model(tenant)
+
+    if payload.action == "inactivate":
+        affected_users = inactivate_tenant_state(db, tenant)
+        refresh_onboarding_state(db, tenant.id)
+        write_audit_log(
+            db,
+            principal,
+            action_type="tenant.lifecycle.inactivate",
+            target_type="tenant",
+            target_id=tenant.id,
+            before=before,
+            after=serialize_model(tenant),
+            request_id=request_id,
+        )
+        db.commit()
+        return ResourceEnvelope[TenantLifecycleActionResult](
+            resource=TenantLifecycleActionResult(
+                tenant_id=tenant.id,
+                action=payload.action,
+                resulting_status=tenant.status,
+                message=f"Organization moved to inactive and {len(affected_users)} user login(s) were disabled.",
+            ),
+            updated_at=tenant.updated_at,
+        )
+
+    if payload.action == "reset":
+        affected_users = reset_tenant_state(db, tenant)
+        refresh_onboarding_state(db, tenant.id)
+        write_audit_log(
+            db,
+            principal,
+            action_type="tenant.lifecycle.reset",
+            target_type="tenant",
+            target_id=tenant.id,
+            before=before,
+            after=serialize_model(tenant),
+            request_id=request_id,
+        )
+        db.commit()
+        return ResourceEnvelope[TenantLifecycleActionResult](
+            resource=TenantLifecycleActionResult(
+                tenant_id=tenant.id,
+                action=payload.action,
+                resulting_status=tenant.status,
+                message=f"Organization reset to onboarding and {len(affected_users)} user login(s) were disabled.",
+            ),
+            updated_at=tenant.updated_at,
+        )
+
+    deleted_users = delete_tenant_and_users(db, tenant)
+    write_audit_log(
+        db,
+        principal,
+        action_type="tenant.lifecycle.delete",
+        target_type="tenant",
+        target_id=tenant_id,
+        before=before,
+        request_id=request_id,
+    )
+    db.commit()
+    return ResourceEnvelope[TenantLifecycleActionResult](
+        resource=TenantLifecycleActionResult(
+            tenant_id=tenant_id,
+            action=payload.action,
+            resulting_status="deleted",
+            message=f"Organization and {len(deleted_users)} user record(s) were removed.",
+        )
+    )
 
 
 @router.get("/{tenant_id}/portal-config", response_model=ResourceEnvelope[TenantPortalConfigSchema])
@@ -378,6 +513,16 @@ def update_tenant(
     before = serialize_model(tenant)
 
     updates = payload.model_dump(exclude_none=True, mode="json")
+    requested_tier = None
+    if "service_tier_definition_id" in updates:
+        requested_tier = get_service_tier_or_404(
+            db,
+            str(updates.pop("service_tier_definition_id")),
+            scope_type="organization",
+            require_active=True,
+        )
+    elif "plan_tier" in updates and updates["plan_tier"]:
+        updates.pop("plan_tier")
     profile_updates = {
         key: updates.pop(key)
         for key in [
@@ -390,10 +535,17 @@ def update_tenant(
         ]
         if key in updates
     }
+    if "tenant_name" in updates and "tenant_key" not in updates:
+        updates["tenant_key"] = generate_tenant_key(db, str(updates["tenant_name"]), exclude_tenant_id=tenant.id)
     for key, value in updates.items():
         setattr(tenant, key, value)
+    if requested_tier is not None:
+        sync_tenant_service_tier_fields(tenant, requested_tier)
     if profile_updates:
         upsert_tenant_profile(db, tenant, profile_updates)
+
+    if tenant.reseller_partner is not None:
+        validate_reseller_capacity(db, tenant.reseller_partner, tenant_to_include=tenant, tenant_tier_override=tenant.service_tier)
 
     if payload.status == "active":
         validate_activation_readiness(db, tenant)
@@ -407,6 +559,44 @@ def update_tenant(
         target_id=tenant.id,
         before=before,
         after=serialize_model(tenant),
+        request_id=request_id,
+    )
+    db.commit()
+    db.refresh(tenant)
+    return ResourceEnvelope[TenantSummary](resource=to_summary(db, tenant), updated_at=tenant.updated_at)
+
+
+@router.post("/{tenant_id}/activation-override", response_model=ResourceEnvelope[TenantSummary])
+def override_tenant_activation(
+    tenant_id: str,
+    payload: ActivationOverrideRequest,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_permission("tenants.write")),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[TenantSummary]:
+    if principal.role not in {"super_admin", "support_admin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Activation override requires HermanScience admin access")
+
+    tenant = get_tenant_or_404(db, tenant_id)
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    before = serialize_model(tenant)
+    tenant.status = "active"
+    onboarding = refresh_onboarding_state(db, tenant.id)
+    write_audit_log(
+        db,
+        principal,
+        action_type="tenant.activation_override",
+        target_type="tenant",
+        target_id=tenant.id,
+        before=before,
+        after=json.dumps(
+            {
+                "tenant": serialize_model(tenant),
+                "override_reason": payload.reason,
+                "onboarding_status": onboarding.onboarding_status,
+            },
+            sort_keys=True,
+        ),
         request_id=request_id,
     )
     db.commit()

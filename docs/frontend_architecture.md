@@ -4,6 +4,8 @@
 Version: v1  
 Purpose: This document translates approved UX wireframes and functional requirements into a frontend architecture plan that sits between UX design and engineering implementation. It maps screens to routes, components, data dependencies, and frontend behavior.
 
+Current build note: the frontend has moved beyond pure planning. For the implemented state of the current React application, see [current_build_status.md](/Users/michaelanderson/projects/Herman-Admin/docs/current_build_status.md:1). The sections below still describe the intended architecture, but the route and module notes in sections 3 through 5 have been updated to reflect the current codebase.
+
 ---
 
 # 1. Frontend Architecture Goals
@@ -62,6 +64,7 @@ Navigation items are role-aware.
 ### Full navigation model
 - Dashboard
 - Activation
+- Resellers
 - Organizations
 - Users
 - Groups
@@ -69,12 +72,13 @@ Navigation items are role-aware.
 - Reporting
 - Operations
 - Exports
+- Service Tiers
 - Settings
 
 ### Role-based visibility
-- HermanScience Super Admin: all sections
+- HermanScience Super Admin: all sections, including reseller management and service tier administration
 - HermanScience Support Admin: dashboard, organizations, users, reporting, operations, exports
-- Partner Reseller Super User: dashboard, activation, organizations, users, groups, admins, reporting, exports, settings
+- Partner Reseller Super User: dashboard, activation, resellers, organizations, users, groups, admins, reporting, exports, settings
 - Tenant Admin: dashboard, users, groups, admins if permitted, reporting, exports, settings
 - Group Admin: dashboard, users scoped to group, reporting, exports if permitted
 - Read-Only Analyst: dashboard, reporting, exports if permitted
@@ -92,29 +96,24 @@ Navigation items are role-aware.
 | `/activation` | Activation landing | reseller, HS admin | Start or resume onboarding |
 | `/activation/new` | Activation wizard | reseller, HS admin | Provision new organization |
 | `/activation/:tenantId` | Activation wizard resume | reseller, HS admin | Continue draft onboarding |
+| `/resellers` | Reseller workspace | HS admin, reseller-scoped | Manage reseller portfolio, admins, defaults, and assignments |
 | `/orgs` | Organization list | scoped | View organizations in scope |
 | `/orgs/:tenantId` | Organization detail | scoped | Deep tenant management view |
-| `/orgs/:tenantId/overview` | Org overview tab | scoped | Summary, KPIs, trend |
 | `/orgs/:tenantId/users` | Org users tab | scoped | Users within org |
 | `/orgs/:tenantId/groups` | Org groups tab | scoped | Groups within org |
 | `/orgs/:tenantId/admins` | Org admins tab | scoped | Org-level admin control |
+| `/orgs/:tenantId/portal` | Org portal tab | scoped write or read | Portal branding and invite UX settings |
 | `/orgs/:tenantId/llm-config` | Org LLM config tab | scoped write or read | Runtime model config |
-| `/orgs/:tenantId/reporting` | Org reporting tab | scoped | Org reporting view |
+| `/orgs/:tenantId/runtime` | Org runtime tab | scoped write or read | Enforcement, retention, reporting, and export controls |
 | `/orgs/:tenantId/onboarding` | Org onboarding tab | scoped | Onboarding checklist and status |
 | `/users` | User list | scoped | Cross-scope user management |
-| `/users/:userIdHash` | User detail | scoped | User analytics and activity |
 | `/groups` | Group list | scoped | Group management |
-| `/groups/:groupId` | Group detail | scoped | Group analytics and roster |
 | `/admins` | Admin list | scoped | Admin management |
-| `/admins/:adminId` | Admin detail/edit | scoped write or read | Role, permissions, scope |
 | `/reports` | Report builder | scoped | Build and run reports |
-| `/reports/:reportKey` | Saved or shareable report view | scoped | Render configured report |
 | `/operations` | Operations dashboard | HS internal only | System health and platform ops |
 | `/exports` | Export jobs | scoped | View export history and downloads |
-| `/settings` | Settings landing | scoped | User and tenant settings |
-| `/settings/profile` | Profile settings | authenticated | Personal preferences |
-| `/settings/tenant` | Tenant settings | scoped write | Tenant runtime and policies |
-| `/not-authorized` | Permission error | authenticated | Access denied |
+| `/tiers` | Service tier administration | HS super admin | Manage org and reseller tier definitions |
+| `/settings` | Settings landing | scoped | Infrastructure, secret vault, database target, and shared LLM settings |
 | `*` | Not found | authenticated | 404 |
 
 ## 4.2 Route Grouping
@@ -152,6 +151,7 @@ src/
   pages/
     dashboard/
     activation/
+    resellers/
     organizations/
     users/
     groups/
@@ -171,34 +171,19 @@ src/
     onboarding/
     permissions/
   features/
-    auth/
     tenants/
-    users/
-    groups/
-    admins/
     reports/
-    exports/
-    llmConfig/
-    onboarding/
-    operations/
-  api/
-    client.ts
-    auth.ts
-    tenants.ts
-    users.ts
-    groups.ts
-    admins.ts
-    reports.ts
-    exports.ts
-    operations.ts
-    llmConfig.ts
-  state/
-    sessionStore.ts
-    scopeStore.ts
-    uiStore.ts
-  types/
-  utils/
+  lib/
+  components/
 ```
+
+Current code alignment:
+
+- Routing is implemented in `src/app/router/AppRouter.tsx`
+- Navigation is implemented in `src/components/shell/SideNav.tsx`
+- API access is consolidated in `src/features/tenants/api.ts` and `src/lib/api.ts`
+- The frontend currently uses React Query and React Hook Form, with light provider state under `src/app/providers/`
+- `/tiers` is now part of the implemented app shell and not just a future settings subsection
 
 ---
 

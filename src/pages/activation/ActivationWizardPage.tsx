@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -10,12 +10,15 @@ import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { WizardStepper } from "../../components/forms/WizardStepper";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
-import type { PlatformManagedLlmConfig } from "../../lib/types";
+import { businessUnitOptions } from "../../features/tenants/groupOptions";
+import type { PlatformManagedLlmConfig, UserMembership } from "../../lib/types";
+import { parseImportedUsers } from "../../lib/userImport";
 
 const tenantSchema = z.object({
   tenant_name: z.string().min(2),
-  tenant_key: z.string().min(2),
-  plan_tier: z.string().optional(),
+  tenant_key: z.string().optional(),
+  reseller_partner_id: z.string().optional(),
+  service_tier_definition_id: z.string().min(1),
   reporting_timezone: z.string().min(2),
   external_customer_id: z.string().optional(),
   organization_type: z.string().optional(),
@@ -68,8 +71,6 @@ const industryOptions = [
   "Marketing",
 ];
 
-const planTierOptions = ["Enterprise", "Business", "Pilot"];
-
 const serviceModeOptions = [
   { value: "managed_service", label: "Managed service" },
   { value: "self_service", label: "Self service" },
@@ -90,6 +91,7 @@ const providerOptions = [
   { value: "openai", label: "OpenAI" },
   { value: "azure_openai", label: "Azure OpenAI" },
   { value: "anthropic", label: "Anthropic" },
+  { value: "xai", label: "xAI / Grok" },
   { value: "custom", label: "Custom Endpoint" },
 ];
 
@@ -97,17 +99,9 @@ const modelOptionsByProvider: Record<string, string[]> = {
   openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-4.1"],
   azure_openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-4.1"],
   anthropic: ["claude-sonnet-4", "claude-opus-4"],
+  xai: ["grok-4.20-reasoning", "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-4.20-multi-agent"],
   custom: [],
 };
-
-const groupTypeOptions = [
-  "Default",
-  "Department",
-  "Business Unit",
-  "Functional Team",
-  "Pilot Cohort",
-  "Leadership",
-];
 
 const defaultLlmForm = {
   provider_type: "openai",
@@ -120,6 +114,25 @@ const defaultLlmForm = {
   transformation_enabled: true,
   scoring_enabled: true,
 };
+
+type SecretSelection = "local_storage" | "encrypted_vault";
+type UserLimitDialogState = {
+  kind: "single" | "bulk";
+  requestedUsers: number;
+  currentUsers: number;
+  limit: number;
+  blocked: boolean;
+};
+
+function inferSecretSelection(secretSource?: string | null, secretReference?: string | null): SecretSelection {
+  if (secretSource === "external_reference") {
+    return "encrypted_vault";
+  }
+  if (secretReference?.startsWith("https://")) {
+    return "encrypted_vault";
+  }
+  return "local_storage";
+}
 
 type RuntimeFormValues = {
   enforcement_mode: "advisory" | "coaching" | "enforced";
@@ -146,9 +159,7 @@ const defaultRuntimeForm: RuntimeFormValues = {
 
 const defaultGroupForm = {
   group_name: "",
-  group_type: "Default",
   business_unit: "",
-  owner_name: "",
   description: "",
 };
 
@@ -220,6 +231,22 @@ function mutationMessage(error: unknown) {
   return "Something went wrong while saving this step.";
 }
 
+function buildOrganizationKeyPreview(tenantName: string) {
+  const normalized = tenantName
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "organization";
+}
+
+function tierUserLimit(limitSource?: { max_users: number | null; has_unlimited_users: boolean } | null) {
+  if (!limitSource || limitSource.has_unlimited_users) {
+    return null;
+  }
+  return limitSource.max_users;
+}
+
 export function ActivationWizardPage() {
   const { tenantId } = useParams();
   const location = useLocation();
@@ -233,6 +260,12 @@ export function ActivationWizardPage() {
   const [adminForm, setAdminForm] = useState(defaultAdminForm);
   const [adminPermissionPreset, setAdminPermissionPreset] = useState<AdminPermissionPresetKey>("read_write");
   const [userGroupId, setUserGroupId] = useState("");
+  const [bulkImportText, setBulkImportText] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [secretSelection, setSecretSelection] = useState<SecretSelection>("local_storage");
+  const [invitePromptUsers, setInvitePromptUsers] = useState<UserMembership[]>([]);
+  const [userLimitDialog, setUserLimitDialog] = useState<UserLimitDialogState | null>(null);
+  const lastAppliedResellerDefaultsId = useRef<string | null>(null);
 
   function advanceToNextStep() {
     setActiveStep((current) => Math.min(steps.length - 1, current + 1));
@@ -243,7 +276,8 @@ export function ActivationWizardPage() {
     defaultValues: {
       tenant_name: "",
       tenant_key: "",
-      plan_tier: "enterprise",
+      reseller_partner_id: "",
+      service_tier_definition_id: "",
       reporting_timezone: "America/New_York",
       external_customer_id: "",
       organization_type: "",
@@ -286,6 +320,20 @@ export function ActivationWizardPage() {
     queryKey: ["platform-managed-llms"],
     queryFn: () => tenantApi.listPlatformManagedLlms(),
   });
+  const resellersQuery = useQuery({
+    queryKey: ["resellers"],
+    queryFn: () => tenantApi.listResellers(),
+  });
+  const organizationTiersQuery = useQuery({
+    queryKey: ["service-tiers", "organization"],
+    queryFn: () => tenantApi.listServiceTiers({ scope_type: "organization" }),
+  });
+  const selectedResellerId = form.watch("reseller_partner_id");
+  const resellerDefaultsQuery = useQuery({
+    queryKey: ["reseller-defaults", selectedResellerId],
+    queryFn: () => tenantApi.getResellerDefaults(selectedResellerId ?? ""),
+    enabled: Boolean(selectedResellerId) && !tenantId,
+  });
 
   useEffect(() => {
     const requestedStep = location.state && typeof location.state === "object" ? (location.state as { step?: number }).step : undefined;
@@ -304,7 +352,8 @@ export function ActivationWizardPage() {
     form.reset({
       tenant_name: resource.tenant.tenant_name,
       tenant_key: resource.tenant.tenant_key,
-      plan_tier: resource.tenant.plan_tier ?? "enterprise",
+      reseller_partner_id: resource.tenant.reseller_partner_id ?? "",
+      service_tier_definition_id: resource.tenant.service_tier_definition_id ?? "",
       reporting_timezone: resource.tenant.reporting_timezone,
       external_customer_id: resource.tenant.external_customer_id ?? "",
       organization_type: resource.profile?.organization_type ?? "",
@@ -330,6 +379,7 @@ export function ActivationWizardPage() {
         transformation_enabled: resource.llm_config?.transformation_enabled ?? true,
         scoring_enabled: resource.llm_config?.scoring_enabled ?? true,
       }));
+      setSecretSelection(inferSecretSelection(resource.llm_config?.secret_source, resource.llm_config?.secret_reference));
     }
 
     if (resource.runtime_settings) {
@@ -345,6 +395,35 @@ export function ActivationWizardPage() {
     }
   }, [form, tenantQuery.data]);
 
+  useEffect(() => {
+    if (tenantId) {
+      return;
+    }
+    const defaults = resellerDefaultsQuery.data?.resource;
+    const resellerId = selectedResellerId ?? "";
+    if (!defaults || !resellerId || lastAppliedResellerDefaultsId.current === resellerId) {
+      return;
+    }
+
+    form.setValue(
+      "service_tier_definition_id",
+      defaults.default_service_tier_definition_id ?? form.getValues("service_tier_definition_id"),
+    );
+    form.setValue(
+      "reporting_timezone",
+      defaults.default_reporting_timezone ?? form.getValues("reporting_timezone"),
+    );
+    form.setValue("service_mode", defaults.default_service_mode ?? form.getValues("service_mode"));
+    form.setValue("portal_base_url", defaults.default_portal_base_url ?? form.getValues("portal_base_url"));
+    form.setValue("portal_logo_url", defaults.default_portal_logo_url ?? form.getValues("portal_logo_url"));
+    form.setValue(
+      "portal_welcome_message",
+      defaults.default_portal_welcome_message ?? form.getValues("portal_welcome_message"),
+    );
+
+    lastAppliedResellerDefaultsId.current = resellerId;
+  }, [form, resellerDefaultsQuery.data, selectedResellerId, tenantId]);
+
   const filteredAdmins = useMemo(() => {
     if (!tenantId) {
       return [];
@@ -358,10 +437,11 @@ export function ActivationWizardPage() {
     mutationFn: (values: TenantFormValues) =>
       tenantApi.createTenant({
         tenant_name: values.tenant_name,
-        tenant_key: values.tenant_key,
-        plan_tier: values.plan_tier ?? null,
+        tenant_key: values.tenant_key || null,
+        plan_tier: null,
+        service_tier_definition_id: values.service_tier_definition_id || null,
         reporting_timezone: values.reporting_timezone,
-        reseller_partner_id: null,
+        reseller_partner_id: values.reseller_partner_id || null,
         status: "onboarding",
         external_customer_id: values.external_customer_id || null,
         organization_type: values.organization_type || null,
@@ -393,7 +473,22 @@ export function ActivationWizardPage() {
   });
 
   const saveLlmMutation = useMutation({
-    mutationFn: () => tenantApi.putLlmConfig(tenantId ?? "", llmForm),
+    mutationFn: () =>
+      tenantApi.putLlmConfig(tenantId ?? "", {
+        ...llmForm,
+        api_key:
+          llmForm.credential_mode === "customer_managed" && secretSelection === "local_storage"
+            ? llmForm.api_key || null
+            : null,
+        secret_reference:
+          llmForm.credential_mode === "platform_managed"
+            ? llmForm.secret_reference || null
+            : secretSelection === "encrypted_vault"
+              ? llmForm.secret_reference || null
+              : activeTenant?.llm_config?.secret_source === "vault_managed"
+                ? llmForm.secret_reference || null
+                : null,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["activation-tenant", tenantId] });
       queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
@@ -422,10 +517,8 @@ export function ActivationWizardPage() {
       tenantApi.createGroup({
         tenant_id: tenantId,
         group_name: groupForm.group_name,
-        group_type: groupForm.group_type,
-        business_unit: groupForm.business_unit,
-        owner_name: groupForm.owner_name,
-        description: groupForm.description,
+        business_unit: groupForm.business_unit || null,
+        description: groupForm.description || null,
       }),
     onSuccess: () => {
       setGroupForm(defaultGroupForm);
@@ -442,20 +535,82 @@ export function ActivationWizardPage() {
         tenant_id: tenantId,
         group_ids: userGroupId ? [userGroupId] : [],
         status: "invited",
+        send_invite: false,
         is_primary: true,
         first_name: userForm.first_name,
         last_name: userForm.last_name,
         email: userForm.email,
         title: userForm.title,
       }),
-    onSuccess: () => {
+    onSuccess: async (result) => {
       setUserForm({
         ...defaultUserForm,
         user_id_hash: buildGeneratedUserId((usersQuery.data?.items.length ?? 0) + 2),
       });
       setUserGroupId("");
-      queryClient.invalidateQueries({ queryKey: ["activation-users", tenantId] });
-      queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
+      await queryClient.invalidateQueries({ queryKey: ["activation-users", tenantId] });
+      await queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
+      setInvitePromptUsers([result.resource]);
+    },
+  });
+
+  const parsedBulkUsers = useMemo(() => parseImportedUsers(bulkImportText), [bulkImportText]);
+
+  const importUsersMutation = useMutation({
+    mutationFn: async () => {
+      if (!tenantId) {
+        throw new Error("Create the organization draft before importing users.");
+      }
+      if (parsedBulkUsers.length === 0) {
+        throw new Error("Paste at least one valid user row to import.");
+      }
+
+      const createdUsers: UserMembership[] = [];
+      const groupIdByName = new Map(groups.map((group) => [group.group_name.trim().toLowerCase(), group.id]));
+      for (const row of parsedBulkUsers) {
+        const groupId = row.group_name ? groupIdByName.get(row.group_name.trim().toLowerCase()) : undefined;
+        const result = await tenantApi.createUser({
+          user_id_hash: row.user_id_hash,
+          tenant_id: tenantId,
+          group_ids: groupId ? [groupId] : [],
+          status: row.status,
+          send_invite: false,
+          is_primary: true,
+          first_name: row.first_name || null,
+          last_name: row.last_name || null,
+          email: row.email || null,
+          title: row.title || null,
+        });
+        createdUsers.push(result.resource);
+      }
+      return createdUsers;
+    },
+    onSuccess: async (createdUsers) => {
+      setBulkImportText("");
+      await queryClient.invalidateQueries({ queryKey: ["activation-users", tenantId] });
+      await queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
+      setInvitePromptUsers(createdUsers);
+    },
+  });
+
+  const inviteUsersMutation = useMutation({
+    mutationFn: async (users: UserMembership[]) => {
+      if (!tenantId) {
+        throw new Error("Create the organization draft before sending invitations.");
+      }
+      const invitableUsers = users.filter((user) => user.profile?.email);
+      for (const user of invitableUsers) {
+        await tenantApi.runUserAction(user.user_id_hash, {
+          tenant_id: tenantId,
+          action: "reinvite",
+        });
+      }
+      return invitableUsers.length;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["activation-users", tenantId] });
+      await queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
+      setInvitePromptUsers([]);
       advanceToNextStep();
     },
   });
@@ -487,19 +642,31 @@ export function ActivationWizardPage() {
     },
   });
 
+  const overrideActivationMutation = useMutation({
+    mutationFn: () => tenantApi.overrideTenantActivation(tenantId ?? "", overrideReason),
+    onSuccess: () => {
+      setOverrideReason("");
+      queryClient.invalidateQueries({ queryKey: ["activation-tenant", tenantId] });
+      queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
+    },
+  });
+
   const activeTenant = tenantQuery.data?.resource;
   const onboarding = onboardingQuery.data?.resource;
   const detectedUsers = usersQuery.data?.items ?? [];
   const hasDetectedUsers = detectedUsers.length > 0;
   const groups = groupsQuery.data?.items ?? [];
+  const isMinimalActivationMode = ["managed_service", "guided_activation", "hybrid"].includes(
+    form.watch("service_mode") || activeTenant?.profile?.service_mode || "",
+  );
   const generatedUserId = useMemo(
     () => buildGeneratedUserId((usersQuery.data?.items.length ?? 0) + 1),
     [usersQuery.data?.items.length],
   );
   const onboardingBlockers = [
     !onboarding?.tenant_created ? "Save the organization record" : null,
-    !onboarding?.llm_configured ? "Save the LLM configuration" : null,
-    !onboarding?.llm_validated ? "Validate the LLM connection" : null,
+    !isMinimalActivationMode && !onboarding?.llm_configured ? "Save the LLM configuration" : null,
+    !isMinimalActivationMode && !onboarding?.llm_validated ? "Validate the LLM connection" : null,
     !onboarding?.users_uploaded ? "Ensure at least one user is available" : null,
     !onboarding?.admin_assigned ? "Assign a tenant admin" : null,
   ].filter((value): value is string => Boolean(value));
@@ -561,10 +728,8 @@ export function ActivationWizardPage() {
     form.watch("organization_type"),
   );
   const industrySelectOptions = withCurrentOption(industryOptions, form.watch("industry"));
-  const planTierSelectOptions = withCurrentOption(
-    planTierOptions.map((option) => option.toLowerCase()),
-    form.watch("plan_tier"),
-  );
+  const organizationTiers = organizationTiersQuery.data?.items ?? [];
+  const organizationKeyPreview = buildOrganizationKeyPreview(form.watch("tenant_name") ?? "");
   const serviceModeSelectOptions = withCurrentSelectOption(
     serviceModeOptions,
     form.watch("service_mode"),
@@ -576,8 +741,8 @@ export function ActivationWizardPage() {
         ? saveLlmMutation.error ?? validateLlmMutation.error
         : activeStep === 2
           ? saveRuntimeMutation.error
-          : activeStep === 3
-            ? createUserMutation.error
+        : activeStep === 3
+            ? createUserMutation.error ?? importUsersMutation.error
             : activeStep === 4
               ? createAdminMutation.error
               : activeStep === 5
@@ -595,8 +760,53 @@ export function ActivationWizardPage() {
     await validateLlmMutation.mutateAsync();
   }
 
+  function handleInviteDecision(shouldInvite: boolean) {
+    if (!shouldInvite) {
+      setInvitePromptUsers([]);
+      advanceToNextStep();
+      return;
+    }
+    inviteUsersMutation.mutate(invitePromptUsers);
+  }
+
+  function requestUserCreation(kind: "single" | "bulk", requestedUsers: number) {
+    const limit = tierUserLimit(activeTenant?.service_tier ?? null);
+    if (!limit) {
+      if (kind === "single") {
+        createUserMutation.mutate();
+      } else {
+        importUsersMutation.mutate();
+      }
+      return;
+    }
+    const currentUsers = detectedUsers.filter((user) => user.status !== "deleted").length;
+    setUserLimitDialog({
+      kind,
+      requestedUsers,
+      currentUsers,
+      limit,
+      blocked: currentUsers + requestedUsers > limit,
+    });
+  }
+
+  function confirmUserCreation() {
+    if (!userLimitDialog) {
+      return;
+    }
+    const { kind } = userLimitDialog;
+    setUserLimitDialog(null);
+    if (kind === "single") {
+      createUserMutation.mutate();
+    } else {
+      importUsersMutation.mutate();
+    }
+  }
+
   if (tenantId && tenantQuery.isLoading) {
     return <LoadingBlock label="Loading activation draft..." />;
+  }
+  if (organizationTiersQuery.isLoading) {
+    return <LoadingBlock label="Loading service tiers..." />;
   }
 
   return (
@@ -675,15 +885,29 @@ export function ActivationWizardPage() {
                     <div className="field-tip">Use the customer-facing organization name exactly as it should appear across admin views and reports.</div>
                   </div>
                   <div>
-                    <label className="field-label" htmlFor="tenant_key">
-                      Organization Key
+                    <label className="field-label" htmlFor="generated_tenant_key">
+                      Generated Organization Key
                     </label>
-                    <input className="field" id="tenant_key" {...form.register("tenant_key")} />
-                    <div className="field-tip">Choose a short stable identifier, usually lowercase and slug-like, that will not need to change later.</div>
+                    <input className="field" id="generated_tenant_key" value={organizationKeyPreview} disabled readOnly />
+                    <div className="field-tip">Herman Admin generates the internal key automatically from the organization name so the admin only needs to enter the name.</div>
                   </div>
                 </div>
 
                 <div className="field-row field-row--three">
+                  <div>
+                    <label className="field-label" htmlFor="reseller_partner_id">
+                      Reseller
+                    </label>
+                    <select className="field" id="reseller_partner_id" {...form.register("reseller_partner_id")}>
+                      <option value="">Direct / HermanScience managed</option>
+                      {(resellersQuery.data?.items ?? []).map((reseller) => (
+                        <option key={reseller.id} value={reseller.id}>
+                          {reseller.reseller_name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="field-tip">Select a reseller when this tenant should be created inside a reseller-owned portfolio and inherit reseller defaults.</div>
+                  </div>
                   <div>
                     <label className="field-label" htmlFor="organization_type">
                       Organization Type
@@ -747,17 +971,18 @@ export function ActivationWizardPage() {
 
                 <div className="field-row">
                   <div>
-                    <label className="field-label" htmlFor="plan_tier">
-                      Plan Tier
+                    <label className="field-label" htmlFor="service_tier_definition_id">
+                      Service Tier
                     </label>
-                    <select className="field" id="plan_tier" {...form.register("plan_tier")}>
-                      {planTierSelectOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option.charAt(0).toUpperCase() + option.slice(1)}
+                    <select className="field" id="service_tier_definition_id" {...form.register("service_tier_definition_id")}>
+                      <option value="">Select service tier</option>
+                      {organizationTiers.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.tier_name}
                         </option>
                       ))}
                     </select>
-                    <div className="field-tip">This is the commercial tier we want reflected in the admin system, not a billing code.</div>
+                    <div className="field-tip">Service tiers are defined by HermanScience super admins and control the organization&apos;s user limits.</div>
                   </div>
                   <div>
                     <label className="field-label" htmlFor="reporting_timezone">
@@ -911,7 +1136,7 @@ export function ActivationWizardPage() {
                 <div className="field-row">
                   <div>
                     <label className="field-label" htmlFor="credential_mode">
-                      Credential Mode
+                      LLM Setup Source
                     </label>
                     <select
                       className="field"
@@ -924,45 +1149,86 @@ export function ActivationWizardPage() {
                         }))
                       }
                     >
-                      <option value="customer_managed">Customer managed</option>
-                      <option value="platform_managed">Platform managed</option>
+                      <option value="platform_managed">HermanScience predefined setup</option>
+                      <option value="customer_managed">Organization provided credentials</option>
                     </select>
-                    <div className="field-tip">Choose whether the tenant provides credentials or HermanScience manages them on the tenant&apos;s behalf.</div>
+                    <div className="field-tip">Choose whether this organization will use a predefined HermanScience LLM setup or provide its own credentials for LLM access.</div>
                   </div>
+                  <div>
+                    <label className="field-label" htmlFor="secret_selection">
+                      Secret Selection
+                    </label>
+                    <select
+                      className="field"
+                      disabled={llmForm.credential_mode === "platform_managed"}
+                      id="secret_selection"
+                      value={secretSelection}
+                      onChange={(event) => setSecretSelection(event.target.value as SecretSelection)}
+                    >
+                      <option value="local_storage">Local Storage</option>
+                      <option value="encrypted_vault">Encrypted Vault</option>
+                    </select>
+                    <div className="field-tip">
+                      {llmForm.credential_mode === "platform_managed"
+                        ? "This organization is using a predefined HermanScience LLM setup, so its secret handling is inherited from the shared configuration."
+                        : "Choose whether the organization key is entered here for internal storage or resolved from an existing vault reference."}
+                    </div>
+                  </div>
+                </div>
+                <div className="field-row">
                   <div>
                     <label className="field-label" htmlFor="api_key">
                       API Key
                     </label>
                     <input
                       className="field"
-                      disabled={llmForm.credential_mode === "platform_managed"}
+                      disabled={llmForm.credential_mode === "platform_managed" || secretSelection === "encrypted_vault"}
                       id="api_key"
-                      placeholder={llmForm.credential_mode === "platform_managed" ? "Managed by HermanScience shared LLM pool" : "Enter customer-managed key"}
-                      type="password"
+                      placeholder={
+                        llmForm.credential_mode === "platform_managed"
+                          ? "Managed by HermanScience shared LLM pool"
+                          : secretSelection === "encrypted_vault"
+                            ? "Retrieved from vault"
+                            : "Enter customer-managed key"
+                      }
+                      readOnly={llmForm.credential_mode !== "customer_managed" || secretSelection === "encrypted_vault"}
+                      type={secretSelection === "local_storage" ? "password" : "text"}
                       value={llmForm.api_key}
                       onChange={(event) => setLlmForm((current) => ({ ...current, api_key: event.target.value }))}
                     />
                     <div className="field-tip">
                       {llmForm.credential_mode === "platform_managed"
-                        ? "Shared platform-managed credentials come from the super-admin LLM pool and are not edited here."
-                        : "Paste the customer-managed API key only when this org is bringing its own credentials. The backend will write it into the admin vault and keep only a masked value plus vault reference in Postgres."}
+                        ? "This organization is using a predefined HermanScience LLM setup, so the shared credentials are supplied from the super-admin LLM pool and are not edited here."
+                        : secretSelection === "encrypted_vault"
+                          ? "This key is expected to come from the referenced vault entry, so direct entry is disabled here."
+                          : "Paste the organization-provided API key here. The backend will write it into the admin vault and keep only a masked value plus internal vault reference in Postgres."}
                     </div>
                   </div>
                   <div>
                     <label className="field-label" htmlFor="secret_reference">
-                      Secret Reference
+                      Secret Vault
                     </label>
                     <input
                       className="field"
-                      disabled={llmForm.credential_mode === "platform_managed"}
+                      disabled={llmForm.credential_mode === "platform_managed" || secretSelection === "local_storage"}
                       id="secret_reference"
-                      value={llmForm.secret_reference}
+                      placeholder={
+                        llmForm.credential_mode === "platform_managed"
+                          ? "Managed by HermanScience shared LLM pool"
+                          : secretSelection === "local_storage"
+                            ? "Defined internally"
+                            : "Enter vault reference"
+                      }
+                      readOnly={llmForm.credential_mode !== "customer_managed" || secretSelection === "local_storage"}
+                      value={llmForm.credential_mode === "customer_managed" && secretSelection === "local_storage" ? "Defined internally" : llmForm.secret_reference}
                       onChange={(event) => setLlmForm((current) => ({ ...current, secret_reference: event.target.value }))}
                     />
                     <div className="field-tip">
                       {llmForm.credential_mode === "platform_managed"
-                        ? "The selected shared LLM supplies the managed secret reference automatically."
-                        : "Optional. Use this when the real credential already lives in another vault. If you paste an API key above, the admin backend will generate and save its own managed vault reference automatically."}
+                        ? "The selected predefined HermanScience LLM setup supplies the managed secret reference automatically."
+                        : secretSelection === "local_storage"
+                          ? "When a local API key is saved, Herman Admin generates and stores the encrypted vault reference internally instead of showing it here."
+                          : "Enter the existing encrypted vault reference that should be used for this organization's LLM credential."}
                     </div>
                   </div>
                 </div>
@@ -1044,7 +1310,7 @@ export function ActivationWizardPage() {
                 </div>
                 <div className="section-note">
                   {llmForm.credential_mode === "platform_managed" && selectedPlatformManagedConfig
-                    ? `This organization will use the shared platform-managed LLM "${selectedPlatformManagedConfig.label}" until it has its own licensed credentials.`
+                    ? `This organization will use the predefined HermanScience LLM setup "${selectedPlatformManagedConfig.label}" unless it is later switched to organization-provided credentials.`
                     : null}
                 </div>
                 <div className="section-note">
@@ -1188,11 +1454,6 @@ export function ActivationWizardPage() {
 
             {activeStep === 5 ? (
               <div className="stack">
-                {filteredAdmins.length === 0 ? (
-                  <div className="section-note section-note--warning">
-                    Add at least one admin in Admin Setup before creating groups so each group owner can be selected from the organization&apos;s admin pool.
-                  </div>
-                ) : null}
                 <div className="field-row">
                   <div>
                     <label className="field-label" htmlFor="new_group_name">
@@ -1207,56 +1468,23 @@ export function ActivationWizardPage() {
                     <div className="field-tip">Use a name the customer would immediately recognize, like a department, program, or rollout cohort.</div>
                   </div>
                   <div>
-                    <label className="field-label" htmlFor="new_group_type">
-                      Group Type
+                    <label className="field-label" htmlFor="group_business_unit">
+                      Business Unit
                     </label>
                     <select
                       className="field"
-                      id="new_group_type"
-                      value={groupForm.group_type}
-                      onChange={(event) => setGroupForm((current) => ({ ...current, group_type: event.target.value }))}
+                      id="group_business_unit"
+                      value={groupForm.business_unit}
+                      onChange={(event) => setGroupForm((current) => ({ ...current, business_unit: event.target.value }))}
                     >
-                      {groupTypeOptions.map((option) => (
+                      <option value="">Select business unit</option>
+                      {businessUnitOptions.map((option) => (
                         <option key={option} value={option}>
                           {option}
                         </option>
                       ))}
                     </select>
-                    <div className="field-tip">Choose the grouping pattern that best explains why these users belong together operationally.</div>
-                  </div>
-                </div>
-
-                <div className="field-row">
-                  <div>
-                    <label className="field-label" htmlFor="group_business_unit">
-                      Business Unit
-                    </label>
-                    <input
-                      className="field"
-                      id="group_business_unit"
-                      value={groupForm.business_unit}
-                      onChange={(event) => setGroupForm((current) => ({ ...current, business_unit: event.target.value }))}
-                    />
-                    <div className="field-tip">Use the customer&apos;s internal business-unit or department label if one exists.</div>
-                  </div>
-                  <div>
-                    <label className="field-label" htmlFor="group_owner_name">
-                      Group Owner
-                    </label>
-                    <select
-                      className="field"
-                      id="group_owner_name"
-                      value={groupForm.owner_name}
-                      onChange={(event) => setGroupForm((current) => ({ ...current, owner_name: event.target.value }))}
-                    >
-                      <option value="">Select an admin user</option>
-                      {filteredAdmins.map((admin) => (
-                        <option key={admin.id} value={admin.profile?.display_name ?? admin.user_id_hash}>
-                          {admin.profile?.email ?? admin.user_id_hash}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="field-tip">Choose the group owner from the available admin users for this organization.</div>
+                    <div className="field-tip">Choose the business area this control zone belongs to. Select Other when no standard unit fits.</div>
                   </div>
                 </div>
 
@@ -1277,7 +1505,7 @@ export function ActivationWizardPage() {
                 <div>
                   <button
                     className="primary-button"
-                    disabled={!tenantId || !groupForm.group_name || !groupForm.owner_name || filteredAdmins.length === 0}
+                    disabled={!tenantId || !groupForm.group_name}
                     onClick={() => createGroupMutation.mutate()}
                     type="button"
                   >
@@ -1294,7 +1522,7 @@ export function ActivationWizardPage() {
                         <tr>
                           <th>Group</th>
                           <th>Business Unit</th>
-                          <th>Owner</th>
+                          <th>Description</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1302,10 +1530,10 @@ export function ActivationWizardPage() {
                           <tr key={group.id}>
                             <td>
                               <strong>{group.group_name}</strong>
-                              <div className="muted">{group.profile?.description ?? group.group_type ?? "No description"}</div>
+                              <div className="muted">{group.profile?.description ?? "No description"}</div>
                             </td>
                             <td>{group.profile?.business_unit ?? "Pending"}</td>
-                            <td>{group.profile?.owner_name ?? "Pending"}</td>
+                            <td>{group.profile?.description ?? "Pending"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1321,7 +1549,7 @@ export function ActivationWizardPage() {
                   This step is for adding the organization&apos;s initial users one at a time. Its primary purpose during onboarding is to create the first admin candidates, but you can add any user type here.
                 </div>
                 <div className="section-note">
-                  Bulk uploads belong on the top-level <Link to="/users">Users</Link> screen. The activation wizard only supports adding users one at a time so we can establish the first organization admins cleanly.
+                  Paste CSV or tab-separated rows to import multiple users in one pass, or add a single user below when you only need one initial admin candidate.
                 </div>
                 {hasDetectedUsers ? (
                   <div className="section-note">
@@ -1354,18 +1582,6 @@ export function ActivationWizardPage() {
                 </div>
 
                 <div className="field-row">
-                  <div>
-                    <label className="field-label" htmlFor="new_user">
-                      User Identifier
-                    </label>
-                    <input
-                      className="field"
-                      id="new_user"
-                      value={userForm.user_id_hash}
-                      readOnly
-                    />
-                    <div className="field-tip">Auto-generated from the current date/time plus the next sequential number for this organization.</div>
-                  </div>
                   <div>
                     <label className="field-label" htmlFor="user_email">
                       Email
@@ -1422,12 +1638,38 @@ export function ActivationWizardPage() {
                 <div>
                   <button
                     className="primary-button"
-                    disabled={!tenantId || !userForm.user_id_hash || createUserMutation.isPending}
-                    onClick={() => createUserMutation.mutate()}
+                    disabled={!tenantId || !userForm.email.trim() || createUserMutation.isPending}
+                    onClick={() => requestUserCreation("single", 1)}
                     type="button"
                   >
                     {createUserMutation.isPending ? "Adding..." : "Add user"}
                   </button>
+                </div>
+
+                <div className="panel panel--inset">
+                  <h3 className="panel-title">Bulk Import</h3>
+                  <div className="muted" style={{ marginTop: 8, marginBottom: 16 }}>
+                    Supported headers include `email,first_name,last_name,title,group_name,status,user_id_hash`.
+                  </div>
+                  <textarea
+                    className="field"
+                    rows={6}
+                    value={bulkImportText}
+                    onChange={(event) => setBulkImportText(event.target.value)}
+                  />
+                  <div className="field-tip">
+                    {parsedBulkUsers.length} row{parsedBulkUsers.length === 1 ? "" : "s"} ready to import. Group names are matched to existing groups when supplied.
+                  </div>
+                  <div style={{ marginTop: 14 }}>
+                    <button
+                      className="secondary-button"
+                      disabled={!tenantId || parsedBulkUsers.length === 0 || importUsersMutation.isPending}
+                      onClick={() => requestUserCreation("bulk", parsedBulkUsers.length)}
+                      type="button"
+                    >
+                      {importUsersMutation.isPending ? "Importing..." : "Import users from pasted rows"}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="table-wrap">
@@ -1446,8 +1688,8 @@ export function ActivationWizardPage() {
                         {filteredAdmins.map((admin) => (
                           <tr key={admin.id}>
                             <td>
-                              <strong>{admin.profile?.display_name ?? admin.user_id_hash}</strong>
-                              <div className="muted">{admin.profile?.email ?? admin.user_id_hash}</div>
+                              <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
+                              <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
                             </td>
                             <td>{admin.role}</td>
                             <td>{admin.scopes.map((scope) => scope.scope_type).join(", ")}</td>
@@ -1490,7 +1732,8 @@ export function ActivationWizardPage() {
                             user_id_hash: selectedUser.user_id_hash,
                             display_name:
                               `${selectedUser.profile?.first_name ?? ""} ${selectedUser.profile?.last_name ?? ""}`.trim()
-                                || selectedUser.user_id_hash,
+                                || selectedUser.profile?.email
+                                || "Unnamed admin",
                             email: selectedUser.profile?.email ?? "",
                           });
                         }}
@@ -1498,7 +1741,7 @@ export function ActivationWizardPage() {
                         <option value="">Choose an existing user</option>
                         {detectedUsers.map((user) => (
                           <option key={user.id} value={user.user_id_hash}>
-                            {user.profile?.email ?? user.user_id_hash}
+                            {user.profile?.email ?? "User without email"}
                           </option>
                         ))}
                       </select>
@@ -1530,18 +1773,6 @@ export function ActivationWizardPage() {
 
                 <div className="field-row">
                   <div>
-                    <label className="field-label" htmlFor="new_admin">
-                      Tenant Admin Identifier
-                    </label>
-                    <input
-                      className="field"
-                      id="new_admin"
-                      value={adminForm.user_id_hash}
-                      onChange={(event) => setAdminForm((current) => ({ ...current, user_id_hash: event.target.value }))}
-                    />
-                    <div className="field-tip">This should match the user identifier for the person who will manage this organization in the admin tool.</div>
-                  </div>
-                  <div>
                     <label className="field-label" htmlFor="admin_email">
                       Email
                     </label>
@@ -1569,7 +1800,7 @@ export function ActivationWizardPage() {
                     <div className="field-tip">Enter the name we should display in admin lists, audit views, and ownership panels.</div>
                   </div>
                   <div style={{ alignSelf: "end" }}>
-                    <button className="primary-button" disabled={!tenantId || !adminForm.user_id_hash} onClick={() => createAdminMutation.mutate()} type="button">
+                    <button className="primary-button" disabled={!tenantId || (!adminForm.email.trim() && !adminForm.display_name.trim())} onClick={() => createAdminMutation.mutate()} type="button">
                       {createAdminMutation.isPending ? "Creating..." : "Create admin"}
                     </button>
                   </div>
@@ -1591,8 +1822,8 @@ export function ActivationWizardPage() {
                         {filteredAdmins.map((admin) => (
                           <tr key={admin.id}>
                             <td>
-                              <strong>{admin.profile?.display_name ?? admin.user_id_hash}</strong>
-                              <div className="muted">{admin.profile?.email ?? admin.user_id_hash}</div>
+                              <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
+                              <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
                             </td>
                             <td>
                               {admin.permissions.length >= 7
@@ -1653,8 +1884,25 @@ export function ActivationWizardPage() {
                     This organization is ready for activation. The admin tool will only update admin-owned database state and readiness flags.
                   </div>
                 )}
+                {isMinimalActivationMode ? (
+                  <div className="section-note">
+                    {form.watch("service_mode") || activeTenant?.profile?.service_mode || "Managed service"} allows phased rollout, so LLM validation is optional for the first activation.
+                  </div>
+                ) : null}
                 <div className="section-note">
                   Activation remains a DB-state change only. This admin tool records the configuration and readiness markers in the database and does not drive Herman Prompt or Herman Transform directly.
+                </div>
+                <div className="field-row">
+                  <div>
+                    <label className="field-label" htmlFor="activation_override_reason">Override Reason</label>
+                    <input
+                      className="field"
+                      id="activation_override_reason"
+                      value={overrideReason}
+                      onChange={(event) => setOverrideReason(event.target.value)}
+                    />
+                    <div className="field-tip">HermanScience admins can bypass remaining gates when a customer needs manual escalation.</div>
+                  </div>
                 </div>
                 <button
                   className="primary-button"
@@ -1663,6 +1911,14 @@ export function ActivationWizardPage() {
                   type="button"
                 >
                   {activateTenantMutation.isPending ? "Activating..." : "Activate organization"}
+                </button>
+                <button
+                  className="ghost-button"
+                  disabled={!tenantId || !overrideReason.trim() || overrideActivationMutation.isPending}
+                  onClick={() => overrideActivationMutation.mutate()}
+                  type="button"
+                >
+                  {overrideActivationMutation.isPending ? "Overriding..." : "Override Activation"}
                 </button>
               </div>
             ) : null}
@@ -1731,6 +1987,103 @@ export function ActivationWizardPage() {
           </div>
         </aside>
       </div>
+
+      {invitePromptUsers.length > 0 ? (
+        <div className="dialog-backdrop" role="presentation">
+          <div
+            className="dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="invite-users-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="split-header">
+              <div>
+                <h3 className="panel-title" id="invite-users-dialog-title">Invite New Users?</h3>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  {invitePromptUsers.length === 1
+                    ? "The new user has been added. Do you want to email an invitation now?"
+                    : `${invitePromptUsers.length} users were added. Do you want to email invitations now?`}
+                </div>
+              </div>
+            </div>
+
+            {inviteUsersMutation.error ? (
+              <div className="section-note section-note--danger" style={{ marginTop: 14 }}>
+                {mutationMessage(inviteUsersMutation.error)}
+              </div>
+            ) : null}
+
+            <div className="section-note" style={{ marginTop: 18 }}>
+              {invitePromptUsers.filter((user) => user.profile?.email).length} of {invitePromptUsers.length} newly added
+              {" "}user{invitePromptUsers.length === 1 ? "" : "s"} have an email address on file and can receive an invitation.
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
+              <button
+                className="primary-button"
+                disabled={inviteUsersMutation.isPending}
+                onClick={() => handleInviteDecision(true)}
+                type="button"
+              >
+                {inviteUsersMutation.isPending ? "Sending..." : "Yes, send invites"}
+              </button>
+              <button
+                className="secondary-button"
+                disabled={inviteUsersMutation.isPending}
+                onClick={() => handleInviteDecision(false)}
+                type="button"
+              >
+                No, not now
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {userLimitDialog ? (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setUserLimitDialog(null)}>
+          <div
+            className="dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="user-limit-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="split-header">
+              <div>
+                <h3 className="panel-title" id="user-limit-dialog-title">User Limit Check</h3>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  {userLimitDialog.blocked
+                    ? userLimitDialog.currentUsers >= userLimitDialog.limit
+                      ? "No more users allowed."
+                      : "This add would exceed the service tier limit."
+                    : userLimitDialog.kind === "single"
+                      ? `Add user number ${userLimitDialog.currentUsers + 1} of total allowed ${userLimitDialog.limit}?`
+                      : `Add users ${userLimitDialog.currentUsers + 1} through ${userLimitDialog.currentUsers + userLimitDialog.requestedUsers} of total allowed ${userLimitDialog.limit}?`}
+                </div>
+              </div>
+            </div>
+
+            <div className={`section-note${userLimitDialog.blocked ? " section-note--danger" : ""}`} style={{ marginTop: 18 }}>
+              {userLimitDialog.blocked
+                ? `${activeTenant?.tenant?.tenant_name ?? "This organization"} is currently using ${userLimitDialog.currentUsers} of ${userLimitDialog.limit} allowed users.`
+                : `${activeTenant?.tenant?.tenant_name ?? "This organization"} is currently using ${userLimitDialog.currentUsers} of ${userLimitDialog.limit} allowed users.`}
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
+              {!userLimitDialog.blocked ? (
+                <button className="primary-button" onClick={confirmUserCreation} type="button">
+                  Continue
+                </button>
+              ) : null}
+              <button className="secondary-button" onClick={() => setUserLimitDialog(null)} type="button">
+                {userLimitDialog.blocked ? "Close" : "Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

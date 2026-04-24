@@ -5,6 +5,7 @@ import { Link, useOutletContext } from "react-router-dom";
 
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
+import { businessUnitOptions } from "../../features/tenants/groupOptions";
 import { formatDateTime, titleCase } from "../../lib/format";
 import type {
   AdminUser,
@@ -30,9 +31,7 @@ type DetailOutletContext = {
 
 const defaultGroupForm = {
   group_name: "",
-  group_type: "Working Group",
   business_unit: "",
-  owner_name: "",
   description: "",
 };
 
@@ -63,6 +62,31 @@ const defaultLlmForm = {
   scoring_enabled: true,
 };
 
+type SecretSelection = "local_storage" | "encrypted_vault";
+type UserLimitDialogState = {
+  requestedUsers: number;
+  currentUsers: number;
+  limit: number;
+  blocked: boolean;
+};
+
+function inferSecretSelection(secretSource?: string | null, secretReference?: string | null): SecretSelection {
+  if (secretSource === "external_reference") {
+    return "encrypted_vault";
+  }
+  if (secretReference?.startsWith("https://")) {
+    return "encrypted_vault";
+  }
+  return "local_storage";
+}
+
+function tierUserLimit(limitSource?: { max_users: number | null; has_unlimited_users: boolean } | null) {
+  if (!limitSource || limitSource.has_unlimited_users) {
+    return null;
+  }
+  return limitSource.max_users;
+}
+
 const defaultRuntimeForm: TenantRuntimeSettings = {
   enforcement_mode: "coaching",
   reporting_enabled: true,
@@ -80,6 +104,7 @@ const llmProviderOptions = [
   { value: "openai", label: "OpenAI" },
   { value: "azure_openai", label: "Azure OpenAI" },
   { value: "anthropic", label: "Anthropic" },
+  { value: "xai", label: "xAI / Grok" },
   { value: "custom", label: "Custom Endpoint" },
 ];
 
@@ -87,6 +112,7 @@ const llmModelOptions: Record<string, string[]> = {
   openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-4.1"],
   azure_openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-4.1"],
   anthropic: ["claude-sonnet-4", "claude-opus-4"],
+  xai: ["grok-4.20-reasoning", "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-4.20-multi-agent"],
   custom: [],
 };
 
@@ -130,6 +156,7 @@ export function OrganizationUsersTab() {
   const invalidateTenant = useTenantInvalidate(tenantId);
   const [userForm, setUserForm] = useState(defaultUserForm);
   const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [userLimitDialog, setUserLimitDialog] = useState<UserLimitDialogState | null>(null);
 
   const createUserMutation = useMutation({
     mutationFn: () =>
@@ -151,6 +178,21 @@ export function OrganizationUsersTab() {
     },
   });
 
+  function requestUserCreation() {
+    const limit = tierUserLimit(tenant.service_tier);
+    if (!limit) {
+      createUserMutation.mutate();
+      return;
+    }
+    const currentUsers = users.filter((user) => user.status !== "deleted").length;
+    setUserLimitDialog({
+      requestedUsers: 1,
+      currentUsers,
+      limit,
+      blocked: currentUsers + 1 > limit,
+    });
+  }
+
   return (
     <div className="stack">
       <div className="panel stack">
@@ -169,15 +211,6 @@ export function OrganizationUsersTab() {
         ) : null}
 
         <div className="field-row field-row--three">
-          <div>
-            <label className="field-label" htmlFor="org_user_hash">User Hash</label>
-            <input
-              className="field"
-              id="org_user_hash"
-              value={userForm.user_id_hash}
-              onChange={(event) => setUserForm((current) => ({ ...current, user_id_hash: event.target.value }))}
-            />
-          </div>
           <div>
             <label className="field-label" htmlFor="org_user_email">Email</label>
             <input
@@ -255,8 +288,8 @@ export function OrganizationUsersTab() {
         <div>
           <button
             className="primary-button"
-            disabled={!userForm.user_id_hash.trim()}
-            onClick={() => createUserMutation.mutate()}
+            disabled={!userForm.email.trim()}
+            onClick={requestUserCreation}
             type="button"
           >
             {createUserMutation.isPending ? "Saving..." : "Add user"}
@@ -286,9 +319,9 @@ export function OrganizationUsersTab() {
                       <strong>
                         {user.profile?.first_name || user.profile?.last_name
                           ? `${user.profile?.first_name ?? ""} ${user.profile?.last_name ?? ""}`.trim()
-                          : user.user_id_hash}
+                          : "Unnamed user"}
                       </strong>
-                      <div className="muted">{user.profile?.email ?? user.user_id_hash}</div>
+                      <div className="muted">{user.profile?.email ?? "No email on file"}</div>
                     </td>
                     <td><StatusBadge value={user.status} /></td>
                     <td>
@@ -303,6 +336,51 @@ export function OrganizationUsersTab() {
           )}
         </div>
       </div>
+
+      {userLimitDialog ? (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setUserLimitDialog(null)}>
+          <div
+            className="dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="org-user-limit-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="split-header">
+              <div>
+                <h3 className="panel-title" id="org-user-limit-dialog-title">User Limit Check</h3>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  {userLimitDialog.blocked
+                    ? userLimitDialog.currentUsers >= userLimitDialog.limit
+                      ? "No more users allowed."
+                      : "This add would exceed the service tier limit."
+                    : `Add user number ${userLimitDialog.currentUsers + 1} of total allowed ${userLimitDialog.limit}?`}
+                </div>
+              </div>
+            </div>
+            <div className={`section-note${userLimitDialog.blocked ? " section-note--danger" : ""}`} style={{ marginTop: 18 }}>
+              {tenant.tenant.tenant_name} is currently using {userLimitDialog.currentUsers} of {userLimitDialog.limit} allowed users.
+            </div>
+            <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
+              {!userLimitDialog.blocked ? (
+                <button
+                  className="primary-button"
+                  onClick={() => {
+                    setUserLimitDialog(null);
+                    createUserMutation.mutate();
+                  }}
+                  type="button"
+                >
+                  Continue
+                </button>
+              ) : null}
+              <button className="secondary-button" onClick={() => setUserLimitDialog(null)} type="button">
+                {userLimitDialog.blocked ? "Close" : "Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -318,9 +396,7 @@ export function OrganizationGroupsTab() {
       tenantApi.createGroup({
         tenant_id: tenantId,
         group_name: groupForm.group_name,
-        group_type: groupForm.group_type || null,
         business_unit: groupForm.business_unit || null,
-        owner_name: groupForm.owner_name || null,
         description: groupForm.description || null,
       }),
     onSuccess: async () => {
@@ -352,35 +428,24 @@ export function OrganizationGroupsTab() {
             />
           </div>
           <div>
-            <label className="field-label" htmlFor="org_group_type">Group Type</label>
-            <input
-              className="field"
-              id="org_group_type"
-              value={groupForm.group_type}
-              onChange={(event) => setGroupForm((current) => ({ ...current, group_type: event.target.value }))}
-            />
-          </div>
-        </div>
-
-        <div className="field-row field-row--three">
-          <div>
             <label className="field-label" htmlFor="org_group_business_unit">Business Unit</label>
-            <input
+            <select
               className="field"
               id="org_group_business_unit"
               value={groupForm.business_unit}
               onChange={(event) => setGroupForm((current) => ({ ...current, business_unit: event.target.value }))}
-            />
+            >
+              <option value="">Select business unit</option>
+              {businessUnitOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </div>
-          <div>
-            <label className="field-label" htmlFor="org_group_owner">Owner</label>
-            <input
-              className="field"
-              id="org_group_owner"
-              value={groupForm.owner_name}
-              onChange={(event) => setGroupForm((current) => ({ ...current, owner_name: event.target.value }))}
-            />
-          </div>
+        </div>
+
+        <div className="field-row">
           <div>
             <label className="field-label" htmlFor="org_group_description">Description</label>
             <input
@@ -414,7 +479,7 @@ export function OrganizationGroupsTab() {
               <thead>
                 <tr>
                   <th>Group</th>
-                  <th>Type</th>
+                  <th>Business Unit</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -425,7 +490,7 @@ export function OrganizationGroupsTab() {
                       <strong>{group.group_name}</strong>
                       <div className="muted">{group.profile?.description ?? "No description yet"}</div>
                     </td>
-                    <td>{group.profile?.business_unit ?? group.group_type ?? "General"}</td>
+                    <td>{group.profile?.business_unit ?? "General"}</td>
                     <td><StatusBadge value={group.is_active ? "active" : "inactive"} /></td>
                   </tr>
                 ))}
@@ -474,15 +539,6 @@ export function OrganizationAdminsTab() {
 
         <div className="field-row field-row--three">
           <div>
-            <label className="field-label" htmlFor="org_admin_hash">User Hash</label>
-            <input
-              className="field"
-              id="org_admin_hash"
-              value={adminForm.user_id_hash}
-              onChange={(event) => setAdminForm((current) => ({ ...current, user_id_hash: event.target.value }))}
-            />
-          </div>
-          <div>
             <label className="field-label" htmlFor="org_admin_name">Display Name</label>
             <input
               className="field"
@@ -509,7 +565,7 @@ export function OrganizationAdminsTab() {
         <div>
           <button
             className="primary-button"
-            disabled={!adminForm.user_id_hash.trim()}
+            disabled={!adminForm.email.trim() && !adminForm.display_name.trim()}
             onClick={() => createAdminMutation.mutate()}
             type="button"
           >
@@ -536,8 +592,8 @@ export function OrganizationAdminsTab() {
                 {admins.map((admin) => (
                   <tr key={admin.id}>
                     <td>
-                      <strong>{admin.profile?.display_name ?? admin.user_id_hash}</strong>
-                      <div className="muted">{admin.profile?.email ?? admin.user_id_hash}</div>
+                      <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
+                      <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
                     </td>
                     <td>{titleCase(admin.role)}</td>
                     <td>{admin.scopes.map((scope) => titleCase(scope.scope_type)).join(", ")}</td>
@@ -557,6 +613,7 @@ export function OrganizationLlmConfigTab() {
   const tenantId = tenant.tenant.id;
   const invalidateTenant = useTenantInvalidate(tenantId);
   const [llmForm, setLlmForm] = useState(defaultLlmForm);
+  const [secretSelection, setSecretSelection] = useState<SecretSelection>("local_storage");
   const [validationMessage, setValidationMessage] = useState<string | null>(tenant.llm_config?.last_validation_message ?? null);
   const platformManagedLlmsQuery = useQuery({
     queryKey: ["platform-managed-llms"],
@@ -575,6 +632,7 @@ export function OrganizationLlmConfigTab() {
       transformation_enabled: tenant.llm_config?.transformation_enabled ?? true,
       scoring_enabled: tenant.llm_config?.scoring_enabled ?? true,
     });
+    setSecretSelection(inferSecretSelection(tenant.llm_config?.secret_source, tenant.llm_config?.secret_reference));
     setValidationMessage(tenant.llm_config?.last_validation_message ?? null);
   }, [tenant]);
 
@@ -584,8 +642,18 @@ export function OrganizationLlmConfigTab() {
         provider_type: llmForm.provider_type,
         model_name: llmForm.model_name,
         endpoint_url: llmForm.endpoint_url || null,
-        api_key: llmForm.api_key || null,
-        secret_reference: llmForm.secret_reference || null,
+        api_key:
+          llmForm.credential_mode === "customer_managed" && secretSelection === "local_storage"
+            ? llmForm.api_key || null
+            : null,
+        secret_reference:
+          llmForm.credential_mode === "platform_managed"
+            ? llmForm.secret_reference || null
+            : secretSelection === "encrypted_vault"
+              ? llmForm.secret_reference || null
+              : tenant.llm_config?.secret_source === "vault_managed"
+                ? llmForm.secret_reference || null
+                : null,
         platform_managed_config_id: llmForm.platform_managed_config_id || null,
         credential_mode: llmForm.credential_mode,
         transformation_enabled: llmForm.transformation_enabled,
@@ -732,7 +800,7 @@ export function OrganizationLlmConfigTab() {
             )}
           </div>
           <div>
-            <label className="field-label" htmlFor="org_llm_mode">Credential Mode</label>
+            <label className="field-label" htmlFor="org_llm_mode">LLM Setup Source</label>
             <select
               className="field"
               id="org_llm_mode"
@@ -744,9 +812,12 @@ export function OrganizationLlmConfigTab() {
                 }))
               }
             >
-              <option value="customer_managed">Customer managed</option>
-              <option value="platform_managed">Platform managed</option>
+              <option value="platform_managed">HermanScience predefined setup</option>
+              <option value="customer_managed">Organization provided credentials</option>
             </select>
+            <div className="field-tip">
+              Choose whether this organization uses a predefined HermanScience LLM setup or supplies its own credentials.
+            </div>
           </div>
         </div>
 
@@ -762,14 +833,47 @@ export function OrganizationLlmConfigTab() {
             />
           </div>
           <div>
-            <label className="field-label" htmlFor="org_llm_secret_ref">Secret Reference</label>
+            <label className="field-label" htmlFor="org_llm_secret_selection">Secret Selection</label>
+            <select
+              className="field"
+              disabled={llmForm.credential_mode === "platform_managed"}
+              id="org_llm_secret_selection"
+              value={secretSelection}
+              onChange={(event) => setSecretSelection(event.target.value as SecretSelection)}
+            >
+              <option value="local_storage">Local Storage</option>
+              <option value="encrypted_vault">Encrypted Vault</option>
+            </select>
+            <div className="field-tip">
+              {llmForm.credential_mode === "platform_managed"
+                ? "This organization is using a predefined HermanScience LLM setup, so secret handling is inherited from that shared configuration."
+                : "Choose whether Herman Admin stores the key internally or reads it from an existing vault reference."}
+            </div>
+          </div>
+          <div>
+            <label className="field-label" htmlFor="org_llm_secret_ref">Secret Vault</label>
             <input
               className="field"
               id="org_llm_secret_ref"
-              disabled={llmForm.credential_mode === "platform_managed"}
-              value={llmForm.secret_reference}
+              disabled={llmForm.credential_mode === "platform_managed" || secretSelection === "local_storage"}
+              placeholder={
+                llmForm.credential_mode === "platform_managed"
+                  ? "Managed by HermanScience shared LLM pool"
+                  : secretSelection === "local_storage"
+                    ? "Defined internally"
+                    : "Enter vault reference"
+              }
+              readOnly={llmForm.credential_mode !== "customer_managed" || secretSelection === "local_storage"}
+              value={llmForm.credential_mode === "customer_managed" && secretSelection === "local_storage" ? "Defined internally" : llmForm.secret_reference}
               onChange={(event) => setLlmForm((current) => ({ ...current, secret_reference: event.target.value }))}
             />
+            <div className="field-tip">
+              {llmForm.credential_mode === "platform_managed"
+                ? "The selected predefined HermanScience LLM setup supplies the managed secret reference automatically."
+                : secretSelection === "local_storage"
+                  ? "When a local API key is saved, Herman Admin creates and stores the encrypted vault reference internally."
+                  : "Enter the existing encrypted vault reference for this organization's LLM credential."}
+            </div>
           </div>
         </div>
 
@@ -778,20 +882,25 @@ export function OrganizationLlmConfigTab() {
           <input
             className="field"
             id="org_llm_api_key"
-            disabled={llmForm.credential_mode === "platform_managed"}
+            disabled={llmForm.credential_mode === "platform_managed" || secretSelection === "encrypted_vault"}
             placeholder={
               llmForm.credential_mode === "platform_managed"
                 ? "Managed by HermanScience shared LLM pool"
-                : tenant.llm_config?.api_key_masked ?? "Paste a new key to rotate credentials"
+                : secretSelection === "encrypted_vault"
+                  ? "Retrieved from vault"
+                  : tenant.llm_config?.api_key_masked ?? "Paste a new key to rotate credentials"
             }
-            type="password"
+            readOnly={llmForm.credential_mode !== "customer_managed" || secretSelection === "encrypted_vault"}
+            type={secretSelection === "local_storage" ? "password" : "text"}
             value={llmForm.api_key}
             onChange={(event) => setLlmForm((current) => ({ ...current, api_key: event.target.value }))}
           />
           <div className="field-tip">
             {llmForm.credential_mode === "platform_managed"
-              ? "The selected shared pool entry provides the managed credential for this organization."
-              : "Leave blank to keep the current stored secret or rely on the referenced vault secret."}
+              ? "This organization is using a predefined HermanScience LLM setup, so shared credentials are not edited here."
+              : secretSelection === "encrypted_vault"
+                ? "This key is expected to come from the referenced vault entry, so direct entry is disabled here."
+                : "Enter a new key here when Herman Admin should store it internally. Leave blank to keep the current internally managed secret."}
           </div>
         </div>
 
@@ -820,7 +929,7 @@ export function OrganizationLlmConfigTab() {
         </div>
         {llmForm.credential_mode === "platform_managed" && selectedPlatformManagedConfig ? (
           <div className="section-note">
-            This organization is using the shared platform-managed LLM "{selectedPlatformManagedConfig.label}" until a customer-managed license is assigned.
+            This organization is using the predefined HermanScience LLM setup "{selectedPlatformManagedConfig.label}" unless it is switched to organization-provided credentials.
           </div>
         ) : null}
         <div className="key-value">
@@ -1125,6 +1234,10 @@ export function OrganizationOnboardingTab() {
   const { tenant, onboarding } = useDetailContext();
   const tenantId = tenant.tenant.id;
   const invalidateTenant = useTenantInvalidate(tenantId);
+  const [overrideReason, setOverrideReason] = useState("");
+  const isMinimalActivationMode = ["managed_service", "guided_activation", "hybrid"].includes(
+    tenant.profile?.service_mode ?? "",
+  );
 
   const activateTenantMutation = useMutation({
     mutationFn: () => tenantApi.activateTenant(tenantId),
@@ -1133,11 +1246,18 @@ export function OrganizationOnboardingTab() {
     },
   });
 
+  const overrideActivationMutation = useMutation({
+    mutationFn: () => tenantApi.overrideTenantActivation(tenantId, overrideReason),
+    onSuccess: async () => {
+      setOverrideReason("");
+      await invalidateTenant();
+    },
+  });
+
   const blockers = [
     !onboarding?.tenant_created ? "Save the organization record" : null,
-    !onboarding?.llm_configured ? "Save the LLM configuration" : null,
-    !onboarding?.llm_validated ? "Validate the LLM connection" : null,
-    !onboarding?.groups_created ? "Create at least one group" : null,
+    !isMinimalActivationMode && !onboarding?.llm_configured ? "Save the LLM configuration" : null,
+    !isMinimalActivationMode && !onboarding?.llm_validated ? "Validate the LLM connection" : null,
     !onboarding?.users_uploaded ? "Ensure at least one user is available" : null,
     !onboarding?.admin_assigned ? "Assign a tenant admin" : null,
   ].filter((value): value is string => Boolean(value));
@@ -1190,6 +1310,12 @@ export function OrganizationOnboardingTab() {
           </div>
         )}
 
+        {isMinimalActivationMode ? (
+          <div className="section-note">
+            {tenant.profile?.service_mode ?? "Managed service"} allows phased activation, so LLM validation and group setup are optional during the first activation pass.
+          </div>
+        ) : null}
+
         <div className="key-value">
           <div className="muted">Last onboarding update</div>
           <div>{formatDateTime(onboarding?.updated_at)}</div>
@@ -1203,6 +1329,21 @@ export function OrganizationOnboardingTab() {
             type="button"
           >
             {activateTenantMutation.isPending ? "Activating..." : "Activate organization"}
+          </button>
+          <input
+            className="field"
+            placeholder="Override reason for HermanScience admins"
+            style={{ minWidth: 280 }}
+            value={overrideReason}
+            onChange={(event) => setOverrideReason(event.target.value)}
+          />
+          <button
+            className="ghost-button"
+            disabled={!overrideReason.trim() || overrideActivationMutation.isPending}
+            onClick={() => overrideActivationMutation.mutate()}
+            type="button"
+          >
+            {overrideActivationMutation.isPending ? "Overriding..." : "Override Activation"}
           </button>
           <Link className="secondary-button" to={`/activation/${tenantId}`}>
             Open activation wizard

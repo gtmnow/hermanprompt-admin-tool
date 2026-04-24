@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -29,8 +29,63 @@ class ResellerPartner(TimestampMixin, Base):
     reseller_key: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     reseller_name: Mapped[str] = mapped_column(String(200))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    service_tier_definition_id: Mapped[str | None] = mapped_column(ForeignKey("service_tier_definitions.id"), index=True)
 
     tenants: Mapped[list["Tenant"]] = relationship(back_populates="reseller_partner")
+    tenant_defaults: Mapped["ResellerTenantDefaults | None"] = relationship(back_populates="reseller_partner", uselist=False)
+    service_tier: Mapped["ServiceTierDefinition | None"] = relationship(foreign_keys=[service_tier_definition_id])
+
+
+class ServiceTierDefinition(TimestampMixin, Base):
+    __tablename__ = "service_tier_definitions"
+    __table_args__ = (UniqueConstraint("scope_type", "tier_key"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    scope_type: Mapped[str] = mapped_column(String(30), index=True)
+    tier_key: Mapped[str] = mapped_column(String(100), index=True)
+    tier_name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text)
+    max_users: Mapped[int | None] = mapped_column(Integer)
+    has_unlimited_users: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_organizations: Mapped[int | None] = mapped_column(Integer)
+    monthly_admin_fee: Mapped[float | None] = mapped_column(Float)
+    per_active_user_fee: Mapped[float | None] = mapped_column(Float)
+    additional_usage_fee: Mapped[str | None] = mapped_column(Text)
+    cqi_assessment: Mapped[int | None] = mapped_column(Integer)
+    billing_notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ResellerTenantDefaults(TimestampMixin, Base):
+    __tablename__ = "reseller_tenant_defaults"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    reseller_partner_id: Mapped[str] = mapped_column(ForeignKey("reseller_partners.id"), unique=True, index=True)
+    default_plan_tier: Mapped[str | None] = mapped_column(String(100))
+    default_service_tier_definition_id: Mapped[str | None] = mapped_column(ForeignKey("service_tier_definitions.id"), index=True)
+    default_reporting_timezone: Mapped[str | None] = mapped_column(String(80))
+    default_service_mode: Mapped[str | None] = mapped_column(String(50))
+    default_portal_base_url: Mapped[str | None] = mapped_column(String(500))
+    default_portal_logo_url: Mapped[str | None] = mapped_column(String(500))
+    default_portal_welcome_message: Mapped[str | None] = mapped_column(Text)
+    default_enforcement_mode: Mapped[str | None] = mapped_column(String(30))
+    default_reporting_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_export_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_raw_prompt_retention_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    default_raw_prompt_admin_visibility: Mapped[bool] = mapped_column(Boolean, default=False)
+    default_data_retention_days: Mapped[int | None] = mapped_column(Integer)
+    default_feature_flags_json: Mapped[str] = mapped_column(Text, default="{}")
+    default_credential_mode: Mapped[str] = mapped_column(String(30), default="customer_managed")
+    default_platform_managed_config_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    default_provider_type: Mapped[str | None] = mapped_column(String(100))
+    default_model_name: Mapped[str | None] = mapped_column(String(200))
+    default_endpoint_url: Mapped[str | None] = mapped_column(String(500))
+    default_transformation_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_scoring_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    reseller_partner: Mapped["ResellerPartner"] = relationship(back_populates="tenant_defaults")
+    default_service_tier: Mapped["ServiceTierDefinition | None"] = relationship(foreign_keys=[default_service_tier_definition_id])
 
 
 class Tenant(TimestampMixin, Base):
@@ -42,10 +97,12 @@ class Tenant(TimestampMixin, Base):
     reseller_partner_id: Mapped[str | None] = mapped_column(ForeignKey("reseller_partners.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
     plan_tier: Mapped[str | None] = mapped_column(String(100))
+    service_tier_definition_id: Mapped[str | None] = mapped_column(ForeignKey("service_tier_definitions.id"), index=True)
     reporting_timezone: Mapped[str] = mapped_column(String(80), default="America/New_York")
     external_customer_id: Mapped[str | None] = mapped_column(String(200))
 
     reseller_partner: Mapped["ResellerPartner | None"] = relationship(back_populates="tenants")
+    service_tier: Mapped["ServiceTierDefinition | None"] = relationship(foreign_keys=[service_tier_definition_id])
     groups: Mapped[list["Group"]] = relationship(back_populates="tenant")
     memberships: Mapped[list["UserTenantMembership"]] = relationship(back_populates="tenant")
     llm_config: Mapped["TenantLLMConfig | None"] = relationship(back_populates="tenant", uselist=False)
@@ -140,6 +197,7 @@ class AdminUser(TimestampMixin, Base):
         cascade="all, delete-orphan",
     )
     profile: Mapped["AdminProfile | None"] = relationship(back_populates="admin_user", uselist=False)
+    sessions: Mapped[list["AdminSession"]] = relationship(back_populates="admin_user", cascade="all, delete-orphan")
 
 
 class UserMembershipProfile(TimestampMixin, Base):
@@ -213,6 +271,23 @@ class AdminPermission(Base):
     permission_key: Mapped[str] = mapped_column(String(100), index=True)
 
     admin_user: Mapped["AdminUser"] = relationship(back_populates="permissions")
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    admin_user_id: Mapped[str] = mapped_column(ForeignKey("admin_users.id"), index=True)
+    user_id_hash: Mapped[str] = mapped_column(String(200), index=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    mfa_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user_agent: Mapped[str | None] = mapped_column(String(1000))
+    source_ip: Mapped[str | None] = mapped_column(String(100))
+
+    admin_user: Mapped["AdminUser"] = relationship(back_populates="sessions")
 
 
 class TenantLLMConfig(TimestampMixin, Base):

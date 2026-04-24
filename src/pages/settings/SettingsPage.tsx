@@ -38,11 +38,14 @@ const defaultPlatformLlmForm = {
   is_active: true,
 };
 
+type SecretSelection = "local_storage" | "encrypted_vault";
+
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState(defaultForm);
   const [promptUiForm, setPromptUiForm] = useState(defaultPromptUiForm);
   const [platformLlmForm, setPlatformLlmForm] = useState(defaultPlatformLlmForm);
+  const [platformLlmSecretSelection, setPlatformLlmSecretSelection] = useState<SecretSelection>("local_storage");
 
   const databaseInstancesQuery = useQuery({
     queryKey: ["database-instances"],
@@ -102,9 +105,15 @@ export function SettingsPage() {
     },
   });
   const createPlatformLlmMutation = useMutation({
-    mutationFn: () => tenantApi.createPlatformManagedLlm(platformLlmForm),
+    mutationFn: () =>
+      tenantApi.createPlatformManagedLlm({
+        ...platformLlmForm,
+        api_key: platformLlmSecretSelection === "local_storage" ? platformLlmForm.api_key || null : null,
+        secret_reference: platformLlmSecretSelection === "encrypted_vault" ? platformLlmForm.secret_reference || null : null,
+      }),
     onSuccess: () => {
       setPlatformLlmForm(defaultPlatformLlmForm);
+      setPlatformLlmSecretSelection("local_storage");
       queryClient.invalidateQueries({ queryKey: ["platform-managed-llms"] });
     },
   });
@@ -488,6 +497,7 @@ export function SettingsPage() {
                 <option value="openai">OpenAI</option>
                 <option value="azure_openai">Azure OpenAI</option>
                 <option value="anthropic">Anthropic</option>
+                <option value="xai">xAI / Grok</option>
                 <option value="custom">Custom Endpoint</option>
               </select>
             </div>
@@ -516,21 +526,39 @@ export function SettingsPage() {
 
           <div className="field-row">
             <div>
+              <label className="field-label" htmlFor="platform_llm_secret_selection">Secret Selection</label>
+              <select
+                className="field"
+                id="platform_llm_secret_selection"
+                value={platformLlmSecretSelection}
+                onChange={(event) => setPlatformLlmSecretSelection(event.target.value as SecretSelection)}
+              >
+                <option value="local_storage">Local Storage</option>
+                <option value="encrypted_vault">Encrypted Vault</option>
+              </select>
+            </div>
+            <div>
               <label className="field-label" htmlFor="platform_llm_api_key">API Key</label>
               <input
                 className="field"
                 id="platform_llm_api_key"
-                type="password"
+                disabled={platformLlmSecretSelection === "encrypted_vault"}
+                placeholder={platformLlmSecretSelection === "encrypted_vault" ? "Retrieved from vault" : "Enter managed key"}
+                readOnly={platformLlmSecretSelection === "encrypted_vault"}
+                type={platformLlmSecretSelection === "local_storage" ? "password" : "text"}
                 value={platformLlmForm.api_key}
                 onChange={(event) => setPlatformLlmForm((current) => ({ ...current, api_key: event.target.value }))}
               />
             </div>
             <div>
-              <label className="field-label" htmlFor="platform_llm_secret_reference">Secret Reference</label>
+              <label className="field-label" htmlFor="platform_llm_secret_reference">Secret Vault</label>
               <input
                 className="field"
                 id="platform_llm_secret_reference"
-                value={platformLlmForm.secret_reference}
+                disabled={platformLlmSecretSelection === "local_storage"}
+                placeholder={platformLlmSecretSelection === "local_storage" ? "Defined internally" : "Enter vault reference"}
+                readOnly={platformLlmSecretSelection === "local_storage"}
+                value={platformLlmSecretSelection === "local_storage" ? "Defined internally" : platformLlmForm.secret_reference}
                 onChange={(event) => setPlatformLlmForm((current) => ({ ...current, secret_reference: event.target.value }))}
               />
             </div>

@@ -116,7 +116,7 @@ export function OrganizationsPage() {
                           <StatusBadge value="draft" tone="warning" />
                         )}
                       </td>
-                      <td>{item.tenant.plan_tier ?? "Not set"}</td>
+                      <td>{item.service_tier?.tier_name ?? item.tenant.plan_tier ?? "Not set"}</td>
                       <td>{formatDate(item.tenant.updated_at)}</td>
                     </tr>
                   );

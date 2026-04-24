@@ -31,8 +31,10 @@ from app.services import (
     parse_datetime,
     refresh_onboarding_state,
     serialize_model,
+    generate_internal_user_id_hash,
     upsert_auth_user,
     upsert_user_membership_profile,
+    validate_tenant_user_limit,
     write_audit_log,
 )
 
@@ -190,19 +192,21 @@ def create_user_membership(
 ) -> ResourceEnvelope[UserMembershipSummary]:
     tenant = get_tenant_or_404(db, str(payload.tenant_id))
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    resolved_user_id_hash = payload.user_id_hash or generate_internal_user_id_hash(payload.email)
     existing_membership = db.scalar(
         select(UserTenantMembership).where(
-            UserTenantMembership.user_id_hash == payload.user_id_hash,
+            UserTenantMembership.user_id_hash == resolved_user_id_hash,
             UserTenantMembership.tenant_id == str(payload.tenant_id),
         )
     )
     if existing_membership is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already assigned to this organization")
+    validate_tenant_user_limit(db, tenant)
 
     auth_row = upsert_auth_user(
         db,
         tenant=tenant,
-        user_id_hash=payload.user_id_hash,
+        user_id_hash=resolved_user_id_hash,
         email=payload.email or "",
         first_name=payload.first_name,
         last_name=payload.last_name,
@@ -210,7 +214,7 @@ def create_user_membership(
     )
 
     membership = UserTenantMembership(
-        user_id_hash=payload.user_id_hash,
+        user_id_hash=resolved_user_id_hash,
         tenant_id=str(payload.tenant_id),
         status=payload.status,
         is_primary=payload.is_primary,
@@ -231,7 +235,7 @@ def create_user_membership(
             )
         )
 
-    if membership.status == "invited":
+    if membership.status == "invited" and payload.send_invite:
         email = (payload.email or "").strip()
         if email:
             recipient_name = " ".join(part for part in [payload.first_name, payload.last_name] if part).strip() or None
@@ -250,7 +254,7 @@ def create_user_membership(
         principal,
         action_type="user_membership.create",
         target_type="auth_user",
-        target_id=payload.user_id_hash,
+        target_id=resolved_user_id_hash,
         after=json.dumps(
             {
                 "auth_tenant_id": auth_row.get("tenant_id"),
@@ -263,7 +267,7 @@ def create_user_membership(
         request_id=request_id,
     )
     db.commit()
-    auth_row = next((row for row in get_auth_users(db, payload.user_id_hash) if str(row["tenant_id"]) in auth_tenant_candidates(tenant)), None)
+    auth_row = next((row for row in get_auth_users(db, resolved_user_id_hash) if str(row["tenant_id"]) in auth_tenant_candidates(tenant)), None)
     if auth_row is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Auth user could not be reloaded")
     return ResourceEnvelope[UserMembershipSummary](resource=auth_row_to_summary(db, auth_row, tenant.id), updated_at=membership.updated_at)
@@ -350,6 +354,7 @@ def update_user_membership(
     )
 
     if membership is None:
+        validate_tenant_user_limit(db, tenant)
         membership = UserTenantMembership(
             user_id_hash=user_id_hash,
             tenant_id=tenant_id,
@@ -358,6 +363,8 @@ def update_user_membership(
         )
         db.add(membership)
         db.flush()
+    elif payload.status is not None and membership.status == "deleted" and payload.status != "deleted":
+        validate_tenant_user_limit(db, tenant)
 
     if payload.status is not None:
         membership.status = payload.status
@@ -472,6 +479,8 @@ def run_user_lifecycle_action(
         if membership is not None:
             membership.status = "inactive"
     elif payload.action == "reinvite":
+        if membership is None or membership.status == "deleted":
+            validate_tenant_user_limit(db, tenant)
         target_status = "invited"
         auth_row = upsert_auth_user(
             db,

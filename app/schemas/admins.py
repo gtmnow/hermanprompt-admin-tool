@@ -16,7 +16,7 @@ class AdminScopeAssignment(BaseModel):
 
 
 class AdminCreate(BaseModel):
-    user_id_hash: str = Field(min_length=1, max_length=200)
+    user_id_hash: str | None = Field(default=None, min_length=1, max_length=200)
     role: str = Field(min_length=1, max_length=50)
     permissions: list[str] = Field(default_factory=list)
     scopes: list[AdminScopeAssignment] = Field(default_factory=list)

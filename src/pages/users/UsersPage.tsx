@@ -1,16 +1,42 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
 import { formatDateTime } from "../../lib/format";
-import type { UserMembership } from "../../lib/types";
+import type { Group, UserMembership } from "../../lib/types";
+import { parseImportedUsers } from "../../lib/userImport";
 
 type UserActionKind = "deactivate" | "reinvite" | "delete";
+type UserLimitDialogState = {
+  requestedUsers: number;
+  currentUsers: number;
+  limit: number;
+  blocked: boolean;
+};
+
+type UserEditForm = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  title: string;
+  status: UserMembership["status"];
+  is_primary: boolean;
+  group_ids: string[];
+};
+
+const defaultUserEditForm: UserEditForm = {
+  first_name: "",
+  last_name: "",
+  email: "",
+  title: "",
+  status: "invited",
+  is_primary: true,
+  group_ids: [],
+};
 
 function actionLabel(action: UserActionKind): string {
   switch (action) {
@@ -45,12 +71,42 @@ function actionConfirmationMessage(action: UserActionKind): string {
   }
 }
 
+function mutationMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "Something went wrong while saving this change.";
+}
+
+function tierUserLimit(limitSource?: { max_users: number | null; has_unlimited_users: boolean } | null) {
+  if (!limitSource || limitSource.has_unlimited_users) {
+    return null;
+  }
+  return limitSource.max_users;
+}
+
+function buildUserEditForm(user: UserMembership): UserEditForm {
+  return {
+    first_name: user.profile?.first_name ?? "",
+    last_name: user.profile?.last_name ?? "",
+    email: user.profile?.email ?? "",
+    title: user.profile?.title ?? "",
+    status: user.status,
+    is_primary: user.is_primary,
+    group_ids: user.group_memberships.map((membership) => membership.group_id),
+  };
+}
+
 export function UsersPage() {
   const [search, setSearch] = useState("");
   const [tenantId, setTenantId] = useState("all");
+  const [importTenantId, setImportTenantId] = useState("");
+  const [importText, setImportText] = useState("");
   const [selectedUser, setSelectedUser] = useState<UserMembership | null>(null);
+  const [userEditForm, setUserEditForm] = useState<UserEditForm>(defaultUserEditForm);
   const [pendingAction, setPendingAction] = useState<UserActionKind | null>(null);
   const [completedAction, setCompletedAction] = useState<UserActionKind | null>(null);
+  const [userLimitDialog, setUserLimitDialog] = useState<UserLimitDialogState | null>(null);
   const queryClient = useQueryClient();
 
   const tenantsQuery = useQuery({
@@ -60,6 +116,10 @@ export function UsersPage() {
   const usersQuery = useQuery({
     queryKey: ["users-page-users"],
     queryFn: () => tenantApi.getUsers(),
+  });
+  const groupsQuery = useQuery({
+    queryKey: ["users-page-groups"],
+    queryFn: () => tenantApi.getGroups(),
   });
 
   const tenantNameById = useMemo(
@@ -87,6 +147,73 @@ export function UsersPage() {
     });
   }, [search, tenantId, usersQuery.data]);
 
+  const selectedUserGroups = useMemo(
+    () =>
+      (groupsQuery.data?.items ?? []).filter((group) => group.tenant_id === selectedUser?.tenant_id),
+    [groupsQuery.data, selectedUser],
+  );
+
+  const invalidateUserQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["users-page-users"] }),
+      queryClient.invalidateQueries({ queryKey: ["users-page-tenants"] }),
+      queryClient.invalidateQueries({ queryKey: ["users-page-groups"] }),
+      queryClient.invalidateQueries({ queryKey: ["tenant-users"] }),
+      queryClient.invalidateQueries({ queryKey: ["tenant-groups"] }),
+      queryClient.invalidateQueries({ queryKey: ["tenant"] }),
+      queryClient.invalidateQueries({ queryKey: ["tenants"] }),
+    ]);
+  };
+
+  const openUserDialog = (user: UserMembership) => {
+    setSelectedUser(user);
+    setUserEditForm(buildUserEditForm(user));
+    setPendingAction(null);
+    setCompletedAction(null);
+    userActionMutation.reset();
+    updateUserMutation.reset();
+  };
+
+  const closeUserDialog = () => {
+    setSelectedUser(null);
+    setUserEditForm(defaultUserEditForm);
+    setPendingAction(null);
+    setCompletedAction(null);
+    userActionMutation.reset();
+    updateUserMutation.reset();
+  };
+
+  const toggleGroupSelection = (groupId: string) => {
+    setUserEditForm((current) => ({
+      ...current,
+      group_ids: current.group_ids.includes(groupId)
+        ? current.group_ids.filter((value) => value !== groupId)
+        : [...current.group_ids, groupId],
+    }));
+  };
+
+  const updateUserMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedUser) {
+        throw new Error("No user selected.");
+      }
+      return tenantApi.updateUser(selectedUser.user_id_hash, selectedUser.tenant_id, {
+        first_name: userEditForm.first_name || null,
+        last_name: userEditForm.last_name || null,
+        email: userEditForm.email || null,
+        title: userEditForm.title || null,
+        status: userEditForm.status,
+        is_primary: userEditForm.is_primary,
+        group_ids: userEditForm.group_ids,
+      });
+    },
+    onSuccess: async ({ resource }) => {
+      await invalidateUserQueries();
+      setSelectedUser(resource);
+      setUserEditForm(buildUserEditForm(resource));
+    },
+  });
+
   const userActionMutation = useMutation({
     mutationFn: (action: UserActionKind) => {
       if (!selectedUser) {
@@ -97,24 +224,91 @@ export function UsersPage() {
         action,
       });
     },
+    onSuccess: async ({ resource }) => {
+      await invalidateUserQueries();
+      setSelectedUser(resource);
+      setUserEditForm(buildUserEditForm(resource));
+    },
+  });
+
+  useEffect(() => {
+    if (!importTenantId && tenantsQuery.data?.items?.[0]?.tenant.id) {
+      setImportTenantId(tenantsQuery.data.items[0].tenant.id);
+    }
+  }, [importTenantId, tenantsQuery.data]);
+
+  useEffect(() => {
+    if (tenantId !== "all") {
+      setImportTenantId(tenantId);
+    }
+  }, [tenantId]);
+
+  const parsedImportRows = useMemo(() => parseImportedUsers(importText), [importText]);
+
+  const importUsersMutation = useMutation({
+    mutationFn: async () => {
+      if (!importTenantId) {
+        throw new Error("Select an organization for the import.");
+      }
+      if (parsedImportRows.length === 0) {
+        throw new Error("Paste at least one valid user row to import.");
+      }
+
+      const groups = await tenantApi.getGroups(importTenantId);
+      const groupIdByName = new Map(
+        groups.items.map((group) => [group.group_name.trim().toLowerCase(), group.id]),
+      );
+
+      for (const row of parsedImportRows) {
+        const groupId = row.group_name ? groupIdByName.get(row.group_name.trim().toLowerCase()) : undefined;
+        await tenantApi.createUser({
+          user_id_hash: row.user_id_hash,
+          tenant_id: importTenantId,
+          group_ids: groupId ? [groupId] : [],
+          status: row.status,
+          is_primary: true,
+          first_name: row.first_name || null,
+          last_name: row.last_name || null,
+          email: row.email || null,
+          title: row.title || null,
+        });
+      }
+    },
     onSuccess: async () => {
+      setImportText("");
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["users-page-users"] }),
-        queryClient.invalidateQueries({ queryKey: ["users-page-tenants"] }),
-        queryClient.invalidateQueries({ queryKey: ["tenant-users"] }),
-        queryClient.invalidateQueries({ queryKey: ["tenant"] }),
-        queryClient.invalidateQueries({ queryKey: ["tenants"] }),
+        invalidateUserQueries(),
+        queryClient.invalidateQueries({ queryKey: ["tenant-onboarding"] }),
+        queryClient.invalidateQueries({ queryKey: ["activation-users"] }),
+        queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail"] }),
       ]);
     },
   });
 
-  if (tenantsQuery.isLoading || usersQuery.isLoading) {
+  if (tenantsQuery.isLoading || usersQuery.isLoading || groupsQuery.isLoading) {
     return <LoadingBlock label="Loading users..." />;
   }
 
   const users = usersQuery.data?.items ?? [];
   const activeUsers = users.filter((user) => user.status === "active").length;
   const withSessions = users.filter((user) => (user.profile?.sessions_count ?? 0) > 0).length;
+  const groupNameById = new Map((groupsQuery.data?.items ?? []).map((group) => [group.id, group.group_name]));
+  const selectedImportTenant = (tenantsQuery.data?.items ?? []).find((item) => item.tenant.id === importTenantId) ?? null;
+  const currentUsersForImportTenant = users.filter((user) => user.tenant_id === importTenantId && user.status !== "deleted").length;
+
+  function requestBulkImport() {
+    const limit = tierUserLimit(selectedImportTenant?.service_tier ?? null);
+    if (!limit) {
+      importUsersMutation.mutate();
+      return;
+    }
+    setUserLimitDialog({
+      requestedUsers: parsedImportRows.length,
+      currentUsers: currentUsersForImportTenant,
+      limit,
+      blocked: currentUsersForImportTenant + parsedImportRows.length > limit,
+    });
+  }
 
   return (
     <div className="stack users-page">
@@ -122,7 +316,7 @@ export function UsersPage() {
         <div>
           <h1 className="page-title">Users</h1>
           <p className="page-subtitle">
-            Review the current Herman Prompt user inventory inside the admin tool, including auth-backed identity records, activity, and organization context.
+            Review the current Herman Prompt user inventory inside the admin tool, including auth-backed identity records, activity, organization context, and editable access assignments.
           </p>
         </div>
         <Link className="secondary-button" to="/orgs">
@@ -154,6 +348,63 @@ export function UsersPage() {
       </div>
 
       <div className="panel users-page__panel">
+        <div className="split-header users-page__filters">
+          <div>
+            <h3 className="panel-title">Bulk Import Users</h3>
+            <div className="muted">Paste CSV or tab-separated rows with headers like `email,first_name,last_name,title,group_name,status,user_id_hash`.</div>
+          </div>
+        </div>
+
+        {importUsersMutation.error ? (
+          <div className="section-note section-note--danger">{mutationMessage(importUsersMutation.error)}</div>
+        ) : null}
+
+        <div className="field-row">
+          <div>
+            <label className="field-label" htmlFor="users_import_tenant">Import Into Organization</label>
+            <select
+              className="field"
+              id="users_import_tenant"
+              value={importTenantId}
+              onChange={(event) => setImportTenantId(event.target.value)}
+            >
+              <option value="">Select organization</option>
+              {(tenantsQuery.data?.items ?? []).map((item) => (
+                <option key={item.tenant.id} value={item.tenant.id}>
+                  {item.tenant.tenant_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="field-label" htmlFor="users_import_text">User Rows</label>
+          <textarea
+            className="field"
+            id="users_import_text"
+            rows={7}
+            value={importText}
+            onChange={(event) => setImportText(event.target.value)}
+          />
+          <div className="field-tip">The preview below ignores blank lines and auto-generates a user hash when one is not supplied.</div>
+        </div>
+
+        <div className="section-note">
+          {parsedImportRows.length} row{parsedImportRows.length === 1 ? "" : "s"} ready to import.
+        </div>
+
+        <div>
+          <button
+            className="primary-button"
+            disabled={!importTenantId || parsedImportRows.length === 0 || importUsersMutation.isPending}
+            onClick={requestBulkImport}
+            type="button"
+          >
+            {importUsersMutation.isPending ? "Importing..." : "Import users"}
+          </button>
+        </div>
+
         <div className="filter-bar users-page__filters">
           <input
             className="search-input users-page__search"
@@ -183,6 +434,7 @@ export function UsersPage() {
                   <th>User</th>
                   <th>Organization</th>
                   <th>Status</th>
+                  <th>Groups</th>
                   <th>Role</th>
                   <th>Sessions</th>
                   <th>Improvement</th>
@@ -196,9 +448,9 @@ export function UsersPage() {
                       <strong>
                         {user.profile?.first_name || user.profile?.last_name
                           ? `${user.profile?.first_name ?? ""} ${user.profile?.last_name ?? ""}`.trim()
-                          : user.user_id_hash}
+                          : "Unnamed user"}
                       </strong>
-                      <div className="muted">{user.profile?.email ?? user.user_id_hash}</div>
+                      <div className="muted">{user.profile?.email ?? "No email on file"}</div>
                     </td>
                     <td className="users-page__org-cell">
                       <Link className="users-page__org-link" to={`/orgs/${user.tenant_id}`}>
@@ -206,18 +458,16 @@ export function UsersPage() {
                       </Link>
                     </td>
                     <td>
-                      <button
-                        className="users-page__status-button"
-                        type="button"
-                        onClick={() => {
-                          setSelectedUser(user);
-                          setPendingAction(null);
-                          setCompletedAction(null);
-                          userActionMutation.reset();
-                        }}
-                      >
+                      <button className="users-page__status-button" type="button" onClick={() => openUserDialog(user)}>
                         <StatusBadge value={user.status} />
                       </button>
+                    </td>
+                    <td>
+                      {user.group_memberships.length > 0
+                        ? user.group_memberships
+                            .map((membership) => groupNameById.get(membership.group_id) ?? "Unknown group")
+                            .join(", ")
+                        : "Unassigned"}
                     </td>
                     <td>{user.profile?.title ?? "Member"}</td>
                     <td>{user.profile?.sessions_count ?? 0}</td>
@@ -232,16 +482,7 @@ export function UsersPage() {
       </div>
 
       {selectedUser ? (
-        <div
-          className="dialog-backdrop"
-          role="presentation"
-          onClick={() => {
-            setSelectedUser(null);
-            setPendingAction(null);
-            setCompletedAction(null);
-            userActionMutation.reset();
-          }}
-        >
+        <div className="dialog-backdrop" role="presentation" onClick={closeUserDialog}>
           <div
             className="dialog-card"
             role="dialog"
@@ -251,28 +492,25 @@ export function UsersPage() {
           >
             <div className="split-header">
               <div>
-                <h3 className="panel-title" id="user-status-dialog-title">Update User Status</h3>
+                <h3 className="panel-title" id="user-status-dialog-title">Manage User</h3>
                 <div className="muted" style={{ marginTop: 6 }}>
-                  {selectedUser.profile?.email ?? selectedUser.user_id_hash}
+                  {selectedUser.profile?.email ?? "No email on file"}
                 </div>
               </div>
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => {
-                  setSelectedUser(null);
-                  setPendingAction(null);
-                  setCompletedAction(null);
-                  userActionMutation.reset();
-                }}
-              >
+              <button className="ghost-button" type="button" onClick={closeUserDialog}>
                 Close
               </button>
             </div>
 
+            {updateUserMutation.error ? (
+              <div className="section-note section-note--danger" style={{ marginTop: 14 }}>
+                {mutationMessage(updateUserMutation.error)}
+              </div>
+            ) : null}
+
             {userActionMutation.error ? (
               <div className="section-note section-note--danger" style={{ marginTop: 14 }}>
-                {userActionMutation.error instanceof Error ? userActionMutation.error.message : "Unable to update user status."}
+                {mutationMessage(userActionMutation.error)}
               </div>
             ) : null}
 
@@ -282,16 +520,7 @@ export function UsersPage() {
                   {actionCompletionMessage(completedAction)}
                 </div>
                 <div className="dialog-actions">
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={() => {
-                      setSelectedUser(null);
-                      setPendingAction(null);
-                      setCompletedAction(null);
-                      userActionMutation.reset();
-                    }}
-                  >
+                  <button className="primary-button" type="button" onClick={closeUserDialog}>
                     Action Completed
                   </button>
                 </div>
@@ -331,16 +560,130 @@ export function UsersPage() {
                 </div>
               </>
             ) : (
-              <>
-                <div className="section-note" style={{ marginTop: 18 }}>
-                  Choose how this user should be handled. Full delete will disable login and move the user into the
-                  `Deactivated_Users` organization while keeping their scoring data in the database for now.
+              <div className="stack" style={{ marginTop: 18 }}>
+                <div className="field-row field-row--three">
+                  <div>
+                    <label className="field-label" htmlFor="manage_user_first_name">First Name</label>
+                    <input
+                      className="field"
+                      id="manage_user_first_name"
+                      value={userEditForm.first_name}
+                      onChange={(event) =>
+                        setUserEditForm((current) => ({ ...current, first_name: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label" htmlFor="manage_user_last_name">Last Name</label>
+                    <input
+                      className="field"
+                      id="manage_user_last_name"
+                      value={userEditForm.last_name}
+                      onChange={(event) =>
+                        setUserEditForm((current) => ({ ...current, last_name: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label" htmlFor="manage_user_email">Email</label>
+                    <input
+                      className="field"
+                      id="manage_user_email"
+                      value={userEditForm.email}
+                      onChange={(event) => setUserEditForm((current) => ({ ...current, email: event.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="field-row field-row--three">
+                  <div>
+                    <label className="field-label" htmlFor="manage_user_title">Title</label>
+                    <input
+                      className="field"
+                      id="manage_user_title"
+                      value={userEditForm.title}
+                      onChange={(event) => setUserEditForm((current) => ({ ...current, title: event.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label" htmlFor="manage_user_status">Status</label>
+                    <select
+                      className="field"
+                      id="manage_user_status"
+                      value={userEditForm.status}
+                      onChange={(event) =>
+                        setUserEditForm((current) => ({
+                          ...current,
+                          status: event.target.value as UserMembership["status"],
+                        }))
+                      }
+                    >
+                      <option value="invited">Invited</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                      <option value="suspended">Suspended</option>
+                    </select>
+                  </div>
+                  <div style={{ alignSelf: "end" }}>
+                    <label className="field-label" htmlFor="manage_user_primary">Primary Membership</label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 44 }}>
+                      <input
+                        id="manage_user_primary"
+                        checked={userEditForm.is_primary}
+                        onChange={(event) =>
+                          setUserEditForm((current) => ({ ...current, is_primary: event.target.checked }))
+                        }
+                        type="checkbox"
+                      />
+                      <span>Flag as the primary organization membership</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="field-label">Groups</div>
+                  {selectedUserGroups.length === 0 ? (
+                    <div className="section-note">This organization has no groups yet, so there is nothing to assign.</div>
+                  ) : (
+                    <div className="stack" style={{ gap: 10 }}>
+                      {selectedUserGroups.map((group: Group) => (
+                        <label key={group.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <input
+                            checked={userEditForm.group_ids.includes(group.id)}
+                            onChange={() => toggleGroupSelection(group.id)}
+                            type="checkbox"
+                          />
+                          <span>
+                            <strong>{group.group_name}</strong>
+                            <span className="muted" style={{ marginLeft: 8 }}>
+                              {group.profile?.business_unit ?? "Group"}
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="dialog-actions">
+                  <button
+                    className="primary-button"
+                    disabled={updateUserMutation.isPending}
+                    onClick={() => updateUserMutation.mutate()}
+                    type="button"
+                  >
+                    {updateUserMutation.isPending ? "Saving..." : "Save User Updates"}
+                  </button>
+                </div>
+
+                <div className="section-note">
+                  Status changes and group assignments support the day-to-day tenant admin workflow. Lifecycle actions below remain available for deactivation, reinvite, and full delete handling.
                 </div>
 
                 <div className="dialog-actions">
                   <button
                     className="secondary-button"
-                    disabled={userActionMutation.isPending}
+                    disabled={userActionMutation.isPending || updateUserMutation.isPending}
                     onClick={() => {
                       setPendingAction("deactivate");
                       userActionMutation.reset();
@@ -351,7 +694,7 @@ export function UsersPage() {
                   </button>
                   <button
                     className="primary-button"
-                    disabled={userActionMutation.isPending}
+                    disabled={userActionMutation.isPending || updateUserMutation.isPending}
                     onClick={() => {
                       setPendingAction("reinvite");
                       userActionMutation.reset();
@@ -362,7 +705,7 @@ export function UsersPage() {
                   </button>
                   <button
                     className="ghost-button users-page__danger-button"
-                    disabled={userActionMutation.isPending}
+                    disabled={userActionMutation.isPending || updateUserMutation.isPending}
                     onClick={() => {
                       setPendingAction("delete");
                       userActionMutation.reset();
@@ -372,8 +715,55 @@ export function UsersPage() {
                     Fully Delete
                   </button>
                 </div>
-              </>
+              </div>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {userLimitDialog ? (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setUserLimitDialog(null)}>
+          <div
+            className="dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="users-limit-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="split-header">
+              <div>
+                <h3 className="panel-title" id="users-limit-dialog-title">User Limit Check</h3>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  {userLimitDialog.blocked
+                    ? userLimitDialog.currentUsers >= userLimitDialog.limit
+                      ? "No more users allowed."
+                      : "This import would exceed the service tier limit."
+                    : `Add users ${userLimitDialog.currentUsers + 1} through ${userLimitDialog.currentUsers + userLimitDialog.requestedUsers} of total allowed ${userLimitDialog.limit}?`}
+                </div>
+              </div>
+            </div>
+
+            <div className={`section-note${userLimitDialog.blocked ? " section-note--danger" : ""}`} style={{ marginTop: 18 }}>
+              {(selectedImportTenant?.tenant.tenant_name ?? "This organization")} is currently using {userLimitDialog.currentUsers} of {userLimitDialog.limit} allowed users.
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
+              {!userLimitDialog.blocked ? (
+                <button
+                  className="primary-button"
+                  onClick={() => {
+                    setUserLimitDialog(null);
+                    importUsersMutation.mutate();
+                  }}
+                  type="button"
+                >
+                  Continue
+                </button>
+              ) : null}
+              <button className="secondary-button" onClick={() => setUserLimitDialog(null)} type="button">
+                {userLimitDialog.blocked ? "Close" : "Cancel"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

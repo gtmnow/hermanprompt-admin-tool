@@ -33,10 +33,12 @@ This matrix maps the major administrative actions in the HermanScience Admin Por
 |---|---|---:|---:|---:|---:|---:|
 | Create reseller partner tenant | Full | No | No | No | No | No |
 | Edit reseller partner tenant metadata | Full | Limited | No | No | No | No |
+| Assign reseller service tier | Full | No | No | No | No | No |
 | Assign reseller portfolio scope | Full | No | No | No | No | No |
 | Reassign tenant to different reseller | Full | No | No | No | No | No |
 | Create customer tenant | Full | No | Full | No | No | No |
 | Edit customer tenant metadata | Full | Limited | Full | Limited | No | No |
+| Assign organization service tier from approved tier catalog | Full | Limited | Full | Limited | No | No |
 | Change tenant status (draft, onboarding, active, suspended, inactive) | Full | Limited | Full | Limited | No | No |
 | Activate tenant | Full | Limited | Full | Limited | No | No |
 | Override activation gating rules | Full | Limited | No | No | No | No |
@@ -176,6 +178,19 @@ This matrix maps the major administrative actions in the HermanScience Admin Por
 
 ---
 
+## 9.1 Tier Catalog Administration
+
+| Action | HSA-SA | HSA-Support | Reseller-SA | Tenant-Admin | Group-Admin | Analyst-RO |
+|---|---|---:|---:|---:|---:|---:|
+| View service tier catalog | Full | View | View | View | No | View |
+| Create organization service tier | Full | No | No | No | No | No |
+| Create reseller service tier | Full | No | No | No | No | No |
+| Edit tier limits or billing metadata | Full | No | No | No | No | No |
+| Activate or deactivate tier definition | Full | No | No | No | No | No |
+| Delete tier definition when not assigned to active reseller or active org | Full | No | No | No | No | No |
+
+---
+
 ## 10. Explicit Anti-Escalation Rules
 
 | Rule | HSA-SA | HSA-Support | Reseller-SA | Tenant-Admin | Group-Admin | Analyst-RO |
@@ -227,4 +242,3 @@ The best companion document to this matrix is a **Role × Screen × Action matri
 - who can see each screen
 - which controls are enabled or hidden
 - which actions should be blocked server-side even if exposed in UI
-

@@ -4,19 +4,23 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
+from app.schemas.service_tiers import ServiceTierDefinitionSummary
+
 
 TenantStatus = Literal["draft", "onboarding", "active", "suspended", "inactive"]
 CredentialMode = Literal["platform_managed", "customer_managed"]
 CredentialStatus = Literal["unvalidated", "valid", "invalid", "suspended"]
 EnforcementMode = Literal["advisory", "coaching", "enforced"]
+TenantLifecycleAction = Literal["inactivate", "reset", "delete"]
 
 
 class TenantBase(BaseModel):
     tenant_name: str = Field(min_length=1, max_length=200)
-    tenant_key: str = Field(min_length=1, max_length=100)
+    tenant_key: str | None = Field(default=None, min_length=1, max_length=100)
     reseller_partner_id: UUID | None = None
     status: TenantStatus = "draft"
     plan_tier: str | None = None
+    service_tier_definition_id: UUID | None = None
     reporting_timezone: str = "America/New_York"
     external_customer_id: str | None = None
     organization_type: str | None = None
@@ -37,6 +41,7 @@ class TenantUpdate(BaseModel):
     reseller_partner_id: UUID | None = None
     status: TenantStatus | None = None
     plan_tier: str | None = None
+    service_tier_definition_id: UUID | None = None
     reporting_timezone: str | None = None
     external_customer_id: str | None = None
     organization_type: str | None = None
@@ -119,6 +124,7 @@ class TenantRuntimeSettingsUpdate(TenantRuntimeSettings):
 
 class TenantSummary(BaseModel):
     tenant: Tenant
+    service_tier: ServiceTierDefinitionSummary | None = None
     profile: TenantProfile | None = None
     portal_config: TenantPortalConfig | None = None
     llm_config: TenantLLMConfig | None = None
@@ -131,3 +137,14 @@ class TenantValidationResult(BaseModel):
     model_accessible: bool
     latency_ms: int | None = None
     message: str | None = None
+
+
+class TenantLifecycleActionRequest(BaseModel):
+    action: TenantLifecycleAction
+
+
+class TenantLifecycleActionResult(BaseModel):
+    tenant_id: UUID
+    action: TenantLifecycleAction
+    resulting_status: TenantStatus | Literal["deleted"]
+    message: str

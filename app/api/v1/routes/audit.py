@@ -6,6 +6,7 @@ from app.db import get_db
 from app.models import AdminAuditLog
 from app.schemas import AuditLogEntry, ListEnvelope
 from app.security import Principal, require_permission
+from app.services import can_view_audit_entry
 
 router = APIRouter()
 
@@ -22,5 +23,9 @@ def list_audit_log(
         query = query.where(AdminAuditLog.action_type == action_type)
     if target_type:
         query = query.where(AdminAuditLog.target_type == target_type)
-    items = [AuditLogEntry.model_validate(item, from_attributes=True) for item in db.scalars(query)]
+    items = [
+        AuditLogEntry.model_validate(item, from_attributes=True)
+        for item in db.scalars(query)
+        if can_view_audit_entry(db, principal, item)
+    ]
     return ListEnvelope[AuditLogEntry](items=items, page=1, page_size=len(items) or 1, total_count=len(items), filters={"action_type": action_type, "target_type": target_type})
