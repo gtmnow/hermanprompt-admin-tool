@@ -245,7 +245,12 @@ def list_tenants(
     items = []
     mapped_snapshot_ids: set[str] = set()
     for tenant in db.scalars(query):
-        ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+        try:
+            ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_403_FORBIDDEN:
+                continue
+            raise
         items.append(to_summary(db, tenant))
         if tenant.external_customer_id:
             mapped_snapshot_ids.add(tenant.external_customer_id)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,7 +22,12 @@ def list_onboarding_statuses(
     items = []
     for onboarding in db.scalars(select(TenantOnboardingStatus).order_by(TenantOnboardingStatus.updated_at.desc())):
         tenant = get_tenant_or_404(db, onboarding.tenant_id)
-        ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+        try:
+            ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_403_FORBIDDEN:
+                continue
+            raise
         items.append(TenantOnboardingStatusSchema.model_validate(refresh_onboarding_state(db, tenant.id), from_attributes=True))
     db.commit()
     return ListEnvelope[TenantOnboardingStatusSchema](items=items, page=1, page_size=len(items) or 1, total_count=len(items), filters={})
