@@ -156,6 +156,73 @@ def table_exists(db: Session, table_name: str) -> bool:
         return False
 
 
+def column_exists(db: Session, table_name: str, column_name: str) -> bool:
+    return bool(
+        db.execute(
+            text(
+                """
+                select 1
+                from information_schema.columns
+                where table_schema = 'public'
+                  and table_name = :table_name
+                  and column_name = :column_name
+                limit 1
+                """
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).first()
+    )
+
+
+def has_auth_user_credentials_table(db: Session) -> bool:
+    return table_exists(db, "auth_user_credentials")
+
+
+def auth_users_has_legacy_password_columns(db: Session) -> bool:
+    return column_exists(db, "auth_users", "password_hash") and column_exists(
+        db, "auth_users", "password_changed_at"
+    )
+
+
+def upsert_disabled_auth_credentials(db: Session, *, user_id_hashes: list[str]) -> None:
+    if not user_id_hashes or not has_auth_user_credentials_table(db):
+        return
+
+    db.execute(
+        text(
+            """
+            insert into auth_user_credentials (
+              user_id_hash,
+              password_hash,
+              password_algorithm,
+              password_set_at,
+              failed_login_attempts,
+              locked_until,
+              last_login_at
+            )
+            values (
+              :user_id_hash,
+              :password_hash,
+              'bcrypt',
+              null,
+              0,
+              null,
+              null
+            )
+            on conflict (user_id_hash) do update
+            set
+              password_hash = excluded.password_hash,
+              password_algorithm = excluded.password_algorithm,
+              password_set_at = null,
+              failed_login_attempts = 0,
+              locked_until = null,
+              last_login_at = null
+            """
+        ),
+        [{"user_id_hash": user_id_hash, "password_hash": AUTH_USER_DISABLED_PASSWORD_HASH} for user_id_hash in user_id_hashes],
+    )
+
+
 def normalize_tier_key(value: str | None) -> str | None:
     if value is None:
         return None
@@ -672,6 +739,14 @@ def get_snapshot_users(db: Session, tenant: Tenant | None = None) -> list[dict[s
 def get_auth_users(db: Session, user_id_hash: str | None = None) -> list[dict[str, object]]:
     user_filter = "where a.user_id_hash = :user_id_hash" if user_id_hash is not None else ""
     params = {"user_id_hash": user_id_hash} if user_id_hash is not None else {}
+    password_changed_select = "null as password_changed_at"
+    credential_join = ""
+    if has_auth_user_credentials_table(db):
+        password_changed_select = "c.password_set_at as password_changed_at"
+        credential_join = "left join auth_user_credentials c on c.user_id_hash = a.user_id_hash"
+    elif column_exists(db, "auth_users", "password_changed_at"):
+        password_changed_select = "a.password_changed_at"
+
     rows = db.execute(
         text(
             f"""
@@ -686,13 +761,14 @@ def get_auth_users(db: Session, user_id_hash: str | None = None) -> list[dict[st
               a.created_at,
               a.updated_at,
               a.last_login_at,
-              a.password_changed_at,
+              {password_changed_select},
               conv.sessions_count,
               conv.last_activity_at,
               fp.structure,
               fp.detail_level,
               fp.prompt_enforcement_level
             from auth_users a
+            {credential_join}
             left join (
               select
                 user_id_hash,
@@ -749,6 +825,8 @@ def upsert_auth_user(
     existing = existing_by_user or existing_by_email
     resolved_is_admin = bool(existing["is_admin"]) if existing and is_admin is None else bool(is_admin)
     now = datetime.utcnow()
+    credentials_table_exists = has_auth_user_credentials_table(db)
+    legacy_password_columns = auth_users_has_legacy_password_columns(db)
 
     if existing:
         db.execute(
@@ -776,48 +854,90 @@ def upsert_auth_user(
             },
         )
     else:
-        db.execute(
-            text(
-                """
-                insert into auth_users (
-                  email,
-                  password_hash,
-                  user_id_hash,
-                  display_name,
-                  tenant_id,
-                  is_active,
-                  is_admin,
-                  created_at,
-                  updated_at,
-                  last_login_at,
-                  password_changed_at
-                ) values (
-                  :email,
-                  :password_hash,
-                  :user_id_hash,
-                  :display_name,
-                  :tenant_id,
-                  :is_active,
-                  :is_admin,
-                  :created_at,
-                  :updated_at,
-                  null,
-                  null
-                )
-                """
-            ),
-            {
-                "email": normalized_email,
-                "password_hash": AUTH_USER_DISABLED_PASSWORD_HASH,
-                "user_id_hash": user_id_hash,
-                "display_name": resolved_display_name,
-                "tenant_id": auth_tenant_id,
-                "is_active": desired_is_active,
-                "is_admin": resolved_is_admin,
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
+        if legacy_password_columns:
+            db.execute(
+                text(
+                    """
+                    insert into auth_users (
+                      email,
+                      password_hash,
+                      user_id_hash,
+                      display_name,
+                      tenant_id,
+                      is_active,
+                      is_admin,
+                      created_at,
+                      updated_at,
+                      last_login_at,
+                      password_changed_at
+                    ) values (
+                      :email,
+                      :password_hash,
+                      :user_id_hash,
+                      :display_name,
+                      :tenant_id,
+                      :is_active,
+                      :is_admin,
+                      :created_at,
+                      :updated_at,
+                      null,
+                      null
+                    )
+                    """
+                ),
+                {
+                    "email": normalized_email,
+                    "password_hash": AUTH_USER_DISABLED_PASSWORD_HASH,
+                    "user_id_hash": user_id_hash,
+                    "display_name": resolved_display_name,
+                    "tenant_id": auth_tenant_id,
+                    "is_active": desired_is_active,
+                    "is_admin": resolved_is_admin,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    insert into auth_users (
+                      email,
+                      user_id_hash,
+                      display_name,
+                      tenant_id,
+                      is_active,
+                      is_admin,
+                      created_at,
+                      updated_at,
+                      last_login_at
+                    ) values (
+                      :email,
+                      :user_id_hash,
+                      :display_name,
+                      :tenant_id,
+                      :is_active,
+                      :is_admin,
+                      :created_at,
+                      :updated_at,
+                      null
+                    )
+                    """
+                ),
+                {
+                    "email": normalized_email,
+                    "user_id_hash": user_id_hash,
+                    "display_name": resolved_display_name,
+                    "tenant_id": auth_tenant_id,
+                    "is_active": desired_is_active,
+                    "is_admin": resolved_is_admin,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+
+    if credentials_table_exists:
+        upsert_disabled_auth_credentials(db, user_id_hashes=[user_id_hash])
 
     row = db.execute(
         text("select * from auth_users where user_id_hash = :user_id_hash order by id desc limit 1"),
@@ -1199,19 +1319,48 @@ def disable_tenant_user_logins(db: Session, tenant: Tenant) -> list[str]:
                 update auth_users
                 set
                   is_active = false,
-                  password_hash = :password_hash,
                   last_login_at = null,
-                  password_changed_at = null,
                   updated_at = :updated_at
                 where tenant_id in :tenant_candidates
                 """
             ).bindparams(bindparam("tenant_candidates", expanding=True)),
             {
-                "password_hash": AUTH_USER_DISABLED_PASSWORD_HASH,
                 "updated_at": now,
                 "tenant_candidates": tenant_candidates,
             },
         )
+        user_id_rows = db.execute(
+            text(
+                """
+                select user_id_hash
+                from auth_users
+                where tenant_id in :tenant_candidates
+                """
+            ).bindparams(bindparam("tenant_candidates", expanding=True)),
+            {"tenant_candidates": tenant_candidates},
+        ).mappings().all()
+        upsert_disabled_auth_credentials(
+            db,
+            user_id_hashes=[str(row["user_id_hash"]) for row in user_id_rows if row.get("user_id_hash")],
+        )
+        if auth_users_has_legacy_password_columns(db):
+            db.execute(
+                text(
+                    """
+                    update auth_users
+                    set
+                      password_hash = :password_hash,
+                      password_changed_at = null,
+                      updated_at = :updated_at
+                    where tenant_id in :tenant_candidates
+                    """
+                ).bindparams(bindparam("tenant_candidates", expanding=True)),
+                {
+                    "password_hash": AUTH_USER_DISABLED_PASSWORD_HASH,
+                    "updated_at": now,
+                    "tenant_candidates": tenant_candidates,
+                },
+            )
     db.execute(
         text(
             """
