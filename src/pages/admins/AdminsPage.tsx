@@ -3,10 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
+import { useAuth } from "../../app/providers/AuthProvider";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
-import type { AdminUser } from "../../lib/types";
+import type { AdminUser, Group, UserMembership } from "../../lib/types";
 
 const adminPermissionPresets = {
   read_write: {
@@ -74,16 +75,54 @@ function buildAdminEditForm(admin: AdminUser): AdminEditForm {
   };
 }
 
+function buildUserLabel(user: UserMembership) {
+  const fullName = `${user.profile?.first_name ?? ""} ${user.profile?.last_name ?? ""}`.trim();
+  const email = user.profile?.email?.trim() ?? "";
+  if (fullName && email) {
+    return `${email} (${fullName})`;
+  }
+  return email || fullName || user.user_id_hash;
+}
+
+function buildAdminProfile(user: UserMembership) {
+  const displayName = `${user.profile?.first_name ?? ""} ${user.profile?.last_name ?? ""}`.trim() || null;
+  return {
+    display_name: displayName,
+    email: user.profile?.email?.trim() || null,
+  };
+}
+
+function filterUsersByGroup(users: UserMembership[], groupId: string) {
+  if (!groupId) {
+    return users;
+  }
+  return users.filter((user) => user.group_memberships.some((membership) => membership.group_id === groupId));
+}
+
+function sortUsersByLabel(users: UserMembership[]) {
+  return [...users].sort((left, right) => buildUserLabel(left).localeCompare(buildUserLabel(right)));
+}
+
+function sortGroupsByName(groups: Group[]) {
+  return [...groups].sort((left, right) => left.group_name.localeCompare(right.group_name));
+}
+
 export function AdminsPage() {
+  const { session } = useAuth();
   const queryClient = useQueryClient();
-  const [tenantId, setTenantId] = useState("");
+  const isSuperAdmin = session?.principal.role === "super_admin";
+
+  const [tenantAdminTenantId, setTenantAdminTenantId] = useState("");
+  const [tenantAdminGroupId, setTenantAdminGroupId] = useState("");
+  const [tenantAdminUserIdHash, setTenantAdminUserIdHash] = useState("");
+  const [tenantAdminPermissionPreset, setTenantAdminPermissionPreset] = useState<AdminPermissionPresetKey>("read_write");
+
+  const [superAdminTenantFilterId, setSuperAdminTenantFilterId] = useState("");
+  const [superAdminGroupId, setSuperAdminGroupId] = useState("");
+  const [superAdminUserIdHash, setSuperAdminUserIdHash] = useState("");
+
+  const [inventoryTenantFilter, setInventoryTenantFilter] = useState("");
   const [search, setSearch] = useState("");
-  const [adminForm, setAdminForm] = useState({
-    user_id_hash: "",
-    display_name: "",
-    email: "",
-  });
-  const [adminPermissionPreset, setAdminPermissionPreset] = useState<AdminPermissionPresetKey>("read_write");
   const [selectedAdmin, setSelectedAdmin] = useState<AdminUser | null>(null);
   const [adminEditForm, setAdminEditForm] = useState<AdminEditForm>(defaultAdminEditForm);
   const [editPermissionPreset, setEditPermissionPreset] = useState<AdminPermissionPresetKey | "custom">("custom");
@@ -96,12 +135,50 @@ export function AdminsPage() {
     queryKey: ["admins-page-admins"],
     queryFn: () => tenantApi.getAdmins(),
   });
+  const tenantAdminUsersQuery = useQuery({
+    queryKey: ["admins-page-tenant-users", tenantAdminTenantId],
+    queryFn: () => tenantApi.getUsers(tenantAdminTenantId),
+    enabled: Boolean(tenantAdminTenantId),
+  });
+  const tenantAdminGroupsQuery = useQuery({
+    queryKey: ["admins-page-tenant-groups", tenantAdminTenantId],
+    queryFn: () => tenantApi.getGroups(tenantAdminTenantId),
+    enabled: Boolean(tenantAdminTenantId),
+  });
+  const superAdminUsersQuery = useQuery({
+    queryKey: ["admins-page-super-users", superAdminTenantFilterId || "all"],
+    queryFn: () => tenantApi.getUsers(superAdminTenantFilterId || undefined),
+    enabled: isSuperAdmin,
+  });
+  const superAdminGroupsQuery = useQuery({
+    queryKey: ["admins-page-super-groups", superAdminTenantFilterId],
+    queryFn: () => tenantApi.getGroups(superAdminTenantFilterId),
+    enabled: isSuperAdmin && Boolean(superAdminTenantFilterId),
+  });
 
   useEffect(() => {
-    if (!tenantId && tenantsQuery.data?.items?.[0]?.tenant.id) {
-      setTenantId(tenantsQuery.data.items[0].tenant.id);
+    if (!tenantAdminTenantId && tenantsQuery.data?.items?.[0]?.tenant.id) {
+      setTenantAdminTenantId(tenantsQuery.data.items[0].tenant.id);
     }
-  }, [tenantId, tenantsQuery.data]);
+  }, [tenantAdminTenantId, tenantsQuery.data]);
+
+  useEffect(() => {
+    setTenantAdminGroupId("");
+    setTenantAdminUserIdHash("");
+  }, [tenantAdminTenantId]);
+
+  useEffect(() => {
+    setSuperAdminGroupId("");
+    setSuperAdminUserIdHash("");
+  }, [superAdminTenantFilterId]);
+
+  useEffect(() => {
+    setTenantAdminUserIdHash("");
+  }, [tenantAdminGroupId]);
+
+  useEffect(() => {
+    setSuperAdminUserIdHash("");
+  }, [superAdminGroupId]);
 
   const invalidateAdminQueries = async () => {
     await Promise.all([
@@ -112,23 +189,77 @@ export function AdminsPage() {
     ]);
   };
 
-  const createAdminMutation = useMutation({
+  const tenantAdminUsers = useMemo(
+    () => sortUsersByLabel(filterUsersByGroup(tenantAdminUsersQuery.data?.items ?? [], tenantAdminGroupId)),
+    [tenantAdminGroupId, tenantAdminUsersQuery.data],
+  );
+  const tenantAdminGroups = useMemo(
+    () => sortGroupsByName(tenantAdminGroupsQuery.data?.items ?? []),
+    [tenantAdminGroupsQuery.data],
+  );
+  const selectedTenantAdminUser = useMemo(
+    () => tenantAdminUsers.find((user) => user.user_id_hash === tenantAdminUserIdHash) ?? null,
+    [tenantAdminUserIdHash, tenantAdminUsers],
+  );
+
+  const superAdminUsers = useMemo(
+    () => sortUsersByLabel(filterUsersByGroup(superAdminUsersQuery.data?.items ?? [], superAdminGroupId)),
+    [superAdminGroupId, superAdminUsersQuery.data],
+  );
+  const superAdminGroups = useMemo(
+    () => sortGroupsByName(superAdminGroupsQuery.data?.items ?? []),
+    [superAdminGroupsQuery.data],
+  );
+  const selectedSuperAdminUser = useMemo(
+    () => superAdminUsers.find((user) => user.user_id_hash === superAdminUserIdHash) ?? null,
+    [superAdminUserIdHash, superAdminUsers],
+  );
+
+  const createTenantAdminMutation = useMutation({
     mutationFn: () => {
-      if (!tenantId) {
-        throw new Error("Select an organization before assigning an admin.");
+      if (!tenantAdminTenantId) {
+        throw new Error("Select an organization before assigning a tenant admin.");
       }
+      if (!selectedTenantAdminUser) {
+        throw new Error("Select a user email before assigning a tenant admin.");
+      }
+      const profile = buildAdminProfile(selectedTenantAdminUser);
       return tenantApi.createAdmin({
-        user_id_hash: adminForm.user_id_hash,
+        user_id_hash: selectedTenantAdminUser.user_id_hash,
         role: "tenant_admin",
-        permissions: adminPermissionPresets[adminPermissionPreset].permissions,
-        scopes: [{ scope_type: "tenant", tenant_id: tenantId }],
-        display_name: adminForm.display_name || null,
-        email: adminForm.email || null,
+        permissions: adminPermissionPresets[tenantAdminPermissionPreset].permissions,
+        scopes: [{ scope_type: "tenant", tenant_id: tenantAdminTenantId }],
+        display_name: profile.display_name,
+        email: profile.email,
       });
     },
     onSuccess: async () => {
-      setAdminForm({ user_id_hash: "", display_name: "", email: "" });
-      setAdminPermissionPreset("read_write");
+      setTenantAdminUserIdHash("");
+      setTenantAdminGroupId("");
+      setTenantAdminPermissionPreset("read_write");
+      await invalidateAdminQueries();
+    },
+  });
+
+  const createSuperAdminMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedSuperAdminUser) {
+        throw new Error("Select a user email before assigning a super admin.");
+      }
+      const profile = buildAdminProfile(selectedSuperAdminUser);
+      return tenantApi.createAdmin({
+        user_id_hash: selectedSuperAdminUser.user_id_hash,
+        role: "super_admin",
+        permissions: [],
+        scopes: [{ scope_type: "global" }],
+        display_name: profile.display_name,
+        email: profile.email,
+      });
+    },
+    onSuccess: async () => {
+      setSuperAdminUserIdHash("");
+      setSuperAdminGroupId("");
+      setSuperAdminTenantFilterId("");
       await invalidateAdminQueries();
     },
   });
@@ -157,8 +288,8 @@ export function AdminsPage() {
   const filteredAdmins = useMemo(() => {
     const admins = adminsQuery.data?.items ?? [];
     return admins.filter((admin) => {
-      const matchesTenant = tenantId
-        ? admin.scopes.some((scope) => scope.tenant_id === tenantId) || tenantId === "all"
+      const matchesTenant = inventoryTenantFilter
+        ? admin.scopes.some((scope) => scope.tenant_id === inventoryTenantFilter)
         : true;
       const haystack = [admin.user_id_hash, admin.profile?.display_name, admin.profile?.email, admin.role]
         .filter(Boolean)
@@ -166,7 +297,7 @@ export function AdminsPage() {
         .toLowerCase();
       return matchesTenant && haystack.includes(search.toLowerCase());
     });
-  }, [adminsQuery.data, search, tenantId]);
+  }, [adminsQuery.data, inventoryTenantFilter, search]);
 
   const openAdminDialog = (admin: AdminUser) => {
     const form = buildAdminEditForm(admin);
@@ -216,7 +347,7 @@ export function AdminsPage() {
         <div>
           <h1 className="page-title">Admins</h1>
           <p className="page-subtitle">
-            Assign and review tenant-scoped admin roles during onboarding or after activation. Reseller-scoped admin setup still lives in the reseller workspace.
+            Assign and review admin roles with separate flows for tenant-scoped access and platform-wide super admin access.
           </p>
         </div>
         <Link className="secondary-button" to="/activation">
@@ -229,21 +360,21 @@ export function AdminsPage() {
           <div>
             <h3 className="panel-title">Assign Tenant Admin</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              Create a tenant-scoped admin with a permission preset and attach it directly to the selected organization.
+              Create a tenant-scoped admin with a permission preset. Filter users by organization and group, then assign by email.
             </div>
           </div>
 
-          {createAdminMutation.error ? (
-            <div className="section-note section-note--danger">{mutationMessage(createAdminMutation.error)}</div>
+          {createTenantAdminMutation.error ? (
+            <div className="section-note section-note--danger">{mutationMessage(createTenantAdminMutation.error)}</div>
           ) : null}
 
           <div>
-            <label className="field-label" htmlFor="admins_tenant_id">Organization</label>
+            <label className="field-label" htmlFor="tenant_admin_tenant_id">Organization</label>
             <select
               className="field"
-              id="admins_tenant_id"
-              value={tenantId}
-              onChange={(event) => setTenantId(event.target.value)}
+              id="tenant_admin_tenant_id"
+              value={tenantAdminTenantId}
+              onChange={(event) => setTenantAdminTenantId(event.target.value)}
             >
               <option value="">Select organization</option>
               {(tenantsQuery.data?.items ?? []).map((item) => (
@@ -254,34 +385,49 @@ export function AdminsPage() {
             </select>
           </div>
 
-          <div className="field-row field-row--three">
-            <div>
-              <label className="field-label" htmlFor="admins_display_name">Display Name</label>
-              <input
-                className="field"
-                id="admins_display_name"
-                value={adminForm.display_name}
-                onChange={(event) => setAdminForm((current) => ({ ...current, display_name: event.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="field-label" htmlFor="admins_email">Email</label>
-              <input
-                className="field"
-                id="admins_email"
-                value={adminForm.email}
-                onChange={(event) => setAdminForm((current) => ({ ...current, email: event.target.value }))}
-              />
-            </div>
+          <div>
+            <label className="field-label" htmlFor="tenant_admin_group_id">Group Filter</label>
+            <select
+              className="field"
+              id="tenant_admin_group_id"
+              value={tenantAdminGroupId}
+              onChange={(event) => setTenantAdminGroupId(event.target.value)}
+              disabled={!tenantAdminTenantId || tenantAdminGroupsQuery.isLoading}
+            >
+              <option value="">All groups</option>
+              {tenantAdminGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.group_name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
-            <label className="field-label" htmlFor="admins_permission_preset">Permission Preset</label>
+            <label className="field-label" htmlFor="tenant_admin_user_id_hash">User Email</label>
             <select
               className="field"
-              id="admins_permission_preset"
-              value={adminPermissionPreset}
-              onChange={(event) => setAdminPermissionPreset(event.target.value as AdminPermissionPresetKey)}
+              id="tenant_admin_user_id_hash"
+              value={tenantAdminUserIdHash}
+              onChange={(event) => setTenantAdminUserIdHash(event.target.value)}
+              disabled={!tenantAdminTenantId || tenantAdminUsersQuery.isLoading}
+            >
+              <option value="">{tenantAdminTenantId ? "Select user by email" : "Select organization first"}</option>
+              {tenantAdminUsers.map((user) => (
+                <option key={user.user_id_hash} value={user.user_id_hash}>
+                  {buildUserLabel(user)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="field-label" htmlFor="tenant_admin_permission_preset">Permission Preset</label>
+            <select
+              className="field"
+              id="tenant_admin_permission_preset"
+              value={tenantAdminPermissionPreset}
+              onChange={(event) => setTenantAdminPermissionPreset(event.target.value as AdminPermissionPresetKey)}
             >
               {Object.entries(adminPermissionPresets).map(([key, preset]) => (
                 <option key={key} value={key}>
@@ -293,89 +439,179 @@ export function AdminsPage() {
 
           <button
             className="primary-button"
-            disabled={!tenantId || (!adminForm.email.trim() && !adminForm.display_name.trim()) || createAdminMutation.isPending}
-            onClick={() => createAdminMutation.mutate()}
+            disabled={!tenantAdminTenantId || !tenantAdminUserIdHash || createTenantAdminMutation.isPending}
+            onClick={() => createTenantAdminMutation.mutate()}
             type="button"
           >
-            {createAdminMutation.isPending ? "Assigning..." : "Assign admin"}
+            {createTenantAdminMutation.isPending ? "Assigning..." : "Assign Tenant Admin"}
           </button>
         </div>
 
-        <div className="panel stack">
-          <div>
-            <h3 className="panel-title">Admin Inventory</h3>
-            <div className="muted" style={{ marginTop: 8 }}>
-              Review tenant-scoped admin assignments and update permissions when an organization needs tighter access controls.
+        {isSuperAdmin ? (
+          <div className="panel stack">
+            <div>
+              <h3 className="panel-title">Assign Super Admin</h3>
+              <div className="muted" style={{ marginTop: 8 }}>
+                Platform-wide admin access is managed separately. Only existing super admins can view or use this card.
+              </div>
+            </div>
+
+            {createSuperAdminMutation.error ? (
+              <div className="section-note section-note--danger">{mutationMessage(createSuperAdminMutation.error)}</div>
+            ) : null}
+
+            <div>
+              <label className="field-label" htmlFor="super_admin_tenant_filter">Organization Filter</label>
+              <select
+                className="field"
+                id="super_admin_tenant_filter"
+                value={superAdminTenantFilterId}
+                onChange={(event) => setSuperAdminTenantFilterId(event.target.value)}
+              >
+                <option value="">All organizations</option>
+                {(tenantsQuery.data?.items ?? []).map((item) => (
+                  <option key={item.tenant.id} value={item.tenant.id}>
+                    {item.tenant.tenant_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="field-label" htmlFor="super_admin_group_id">Group Filter</label>
+              <select
+                className="field"
+                id="super_admin_group_id"
+                value={superAdminGroupId}
+                onChange={(event) => setSuperAdminGroupId(event.target.value)}
+                disabled={!superAdminTenantFilterId || superAdminGroupsQuery.isLoading}
+              >
+                <option value="">All groups</option>
+                {superAdminGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.group_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="field-label" htmlFor="super_admin_user_id_hash">User Email</label>
+              <select
+                className="field"
+                id="super_admin_user_id_hash"
+                value={superAdminUserIdHash}
+                onChange={(event) => setSuperAdminUserIdHash(event.target.value)}
+                disabled={superAdminUsersQuery.isLoading}
+              >
+                <option value="">Select user by email</option>
+                {superAdminUsers.map((user) => (
+                  <option key={user.user_id_hash} value={user.user_id_hash}>
+                    {buildUserLabel(user)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              className="primary-button"
+              disabled={!superAdminUserIdHash || createSuperAdminMutation.isPending}
+              onClick={() => createSuperAdminMutation.mutate()}
+              type="button"
+            >
+              {createSuperAdminMutation.isPending ? "Assigning..." : "Assign Super Admin"}
+            </button>
+          </div>
+        ) : (
+          <div className="panel stack">
+            <div>
+              <h3 className="panel-title">Super Admin Access</h3>
+              <div className="muted" style={{ marginTop: 8 }}>
+                This assignment card is visible only to existing super admins so platform-wide access stays tightly controlled.
+              </div>
             </div>
           </div>
+        )}
+      </div>
 
-          <div className="filter-bar">
-            <input
-              className="search-input"
-              placeholder="Search admins"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <select className="select-input" value={tenantId || "all"} onChange={(event) => setTenantId(event.target.value === "all" ? "" : event.target.value)}>
-              <option value="all">All organizations</option>
-              {(tenantsQuery.data?.items ?? []).map((item) => (
-                <option key={item.tenant.id} value={item.tenant.id}>
-                  {item.tenant.tenant_name}
-                </option>
-              ))}
-            </select>
+      <div className="panel stack">
+        <div>
+          <h3 className="panel-title">Admin Inventory</h3>
+          <div className="muted" style={{ marginTop: 8 }}>
+            Review current admin assignments and tune permissions without mixing platform-wide admin creation into tenant-scoped onboarding work.
           </div>
+        </div>
 
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
+        <div className="filter-bar">
+          <input
+            className="search-input"
+            placeholder="Search admins"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <select
+            className="select-input"
+            value={inventoryTenantFilter || "all"}
+            onChange={(event) => setInventoryTenantFilter(event.target.value === "all" ? "" : event.target.value)}
+          >
+            <option value="all">All organizations</option>
+            {(tenantsQuery.data?.items ?? []).map((item) => (
+              <option key={item.tenant.id} value={item.tenant.id}>
+                {item.tenant.tenant_name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Admin</th>
+                <th>Role</th>
+                <th>Scope</th>
+                <th>Permissions</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredAdmins.length === 0 ? (
                 <tr>
-                  <th>Admin</th>
-                  <th>Role</th>
-                  <th>Scope</th>
-                  <th>Permissions</th>
-                  <th>Status</th>
-                  <th>Action</th>
+                  <td colSpan={6}>No admins match the current filters.</td>
                 </tr>
-              </thead>
-              <tbody>
-                {filteredAdmins.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>No admins match the current filters.</td>
+              ) : (
+                filteredAdmins.map((admin) => (
+                  <tr key={admin.id}>
+                    <td>
+                      <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
+                      <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
+                    </td>
+                    <td>{admin.role}</td>
+                    <td>
+                      {admin.scopes
+                        .map((scope) => {
+                          if (scope.tenant_id) {
+                            return tenantNameById.get(scope.tenant_id) ?? scope.tenant_id;
+                          }
+                          return scope.scope_type;
+                        })
+                        .join(", ")}
+                    </td>
+                    <td>{admin.permissions.map((permission) => permission.permission_key).join(", ") || "No permissions"}</td>
+                    <td>
+                      <StatusBadge value={admin.is_active ? "active" : "inactive"} />
+                    </td>
+                    <td>
+                      <button className="ghost-button" onClick={() => openAdminDialog(admin)} type="button">
+                        Manage
+                      </button>
+                    </td>
                   </tr>
-                ) : (
-                  filteredAdmins.map((admin) => (
-                    <tr key={admin.id}>
-                      <td>
-                        <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
-                        <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
-                      </td>
-                      <td>{admin.role}</td>
-                      <td>
-                        {admin.scopes
-                          .map((scope) => {
-                            if (scope.tenant_id) {
-                              return tenantNameById.get(scope.tenant_id) ?? scope.tenant_id;
-                            }
-                            return scope.scope_type;
-                          })
-                          .join(", ")}
-                      </td>
-                      <td>{admin.permissions.map((permission) => permission.permission_key).join(", ") || "No permissions"}</td>
-                      <td>
-                        <StatusBadge value={admin.is_active ? "active" : "inactive"} />
-                      </td>
-                      <td>
-                        <button className="ghost-button" onClick={() => openAdminDialog(admin)} type="button">
-                          Manage
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -480,7 +716,7 @@ export function AdminsPage() {
               </div>
 
               <div className="section-note">
-                Scope changes remain locked to the existing tenant assignment on this branch so we can strengthen reseller foundation workflows without risking cross-system scope drift.
+                Scope changes remain locked to the existing assignment so we can manage roles safely without creating cross-tenant drift from this dialog.
               </div>
 
               <div className="dialog-actions">
