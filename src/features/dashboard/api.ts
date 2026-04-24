@@ -45,7 +45,7 @@ export async function getDashboardData(selectedTenantId?: string, rangeKey: Dash
   const window = getRangeWindow(rangeKey);
 
   const [systemOverview, tenants, onboarding, report] = await Promise.all([
-    api.getResource<SystemOverview>("/system/overview"),
+    api.getResource<SystemOverview>("/system/overview").catch(() => null),
     api.getList<TenantSummary>("/tenants"),
     api.getList<TenantOnboarding>("/onboarding/tenants"),
     api.postResource<ReportSummary>("/reports/run", {
@@ -60,7 +60,7 @@ export async function getDashboardData(selectedTenantId?: string, rangeKey: Dash
   ]);
 
   return {
-    systemOverview: systemOverview.resource,
+    systemOverview: systemOverview?.resource ?? null,
     tenants: tenants.items,
     onboarding: onboarding.items,
     report: report.resource,

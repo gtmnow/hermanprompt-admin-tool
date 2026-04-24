@@ -16,11 +16,14 @@ import {
 } from "../../features/dashboard/api";
 
 export function DashboardPage() {
-  const { selectedTenant, selectedTenantId } = useOrganizationScope();
+  const { isLoading: scopeIsLoading, selectedTenant, selectedTenantId, visibleTenants } = useOrganizationScope();
   const [rangeKey, setRangeKey] = useState<DashboardRangeKey>("30d");
+  const effectiveTenantId = selectedTenantId ?? (visibleTenants.length === 1 ? visibleTenants[0]?.tenant.id ?? null : null);
+  const effectiveTenant = selectedTenant ?? (visibleTenants.length === 1 ? visibleTenants[0] ?? null : null);
   const dashboardQuery = useQuery({
-    queryKey: ["dashboard", selectedTenantId ?? "all", rangeKey],
-    queryFn: () => getDashboardData(selectedTenantId ?? undefined, rangeKey),
+    queryKey: ["dashboard", effectiveTenantId ?? "all", rangeKey],
+    queryFn: () => getDashboardData(effectiveTenantId ?? undefined, rangeKey),
+    enabled: !scopeIsLoading,
   });
 
   const scopedTenants = useMemo(() => {
@@ -28,24 +31,24 @@ export function DashboardPage() {
       return [];
     }
 
-    if (!selectedTenantId) {
+    if (!effectiveTenantId) {
       return dashboardQuery.data.tenants;
     }
 
-    return dashboardQuery.data.tenants.filter((tenant) => tenant.tenant.id === selectedTenantId);
-  }, [dashboardQuery.data, selectedTenantId]);
+    return dashboardQuery.data.tenants.filter((tenant) => tenant.tenant.id === effectiveTenantId);
+  }, [dashboardQuery.data, effectiveTenantId]);
 
   const scopedOnboarding = useMemo(() => {
     if (!dashboardQuery.data) {
       return [];
     }
 
-    if (!selectedTenantId) {
+    if (!effectiveTenantId) {
       return dashboardQuery.data.onboarding;
     }
 
-    return dashboardQuery.data.onboarding.filter((item) => item.tenant_id === selectedTenantId);
-  }, [dashboardQuery.data, selectedTenantId]);
+    return dashboardQuery.data.onboarding.filter((item) => item.tenant_id === effectiveTenantId);
+  }, [dashboardQuery.data, effectiveTenantId]);
 
   const alerts = useMemo(() => {
     if (!dashboardQuery.data) {
@@ -71,7 +74,7 @@ export function DashboardPage() {
     ];
   }, [dashboardQuery.data, scopedOnboarding, scopedTenants]);
 
-  if (dashboardQuery.isLoading) {
+  if (scopeIsLoading || dashboardQuery.isLoading) {
     return <LoadingBlock label="Loading dashboard summary..." />;
   }
 
@@ -80,12 +83,12 @@ export function DashboardPage() {
   }
 
   const { report, systemOverview } = dashboardQuery.data;
-  const activeUsersKpi = report.kpis.find((item) => item.label === "Active Users")?.value ?? systemOverview.active_user_count;
+  const activeUsersKpi = report.kpis.find((item) => item.label === "Active Users")?.value ?? systemOverview?.active_user_count ?? 0;
   const averageImprovementKpi = report.kpis.find((item) => item.label === "Average Improvement")?.value ?? "N/A";
   const reportTenantCount = report.tables.find((item) => item.metric === "tenant_count")?.value;
   const sessionUserCount = Number(report.tables.find((item) => item.metric === "session_user_count")?.value ?? 0);
-  const activeOrganizationCount = selectedTenant ? 1 : Number(reportTenantCount ?? scopedTenants.length);
-  const selectedScopeLabel = selectedTenant?.tenant.tenant_name ?? "all visible organizations";
+  const activeOrganizationCount = effectiveTenant ? 1 : Number(reportTenantCount ?? scopedTenants.length);
+  const selectedScopeLabel = effectiveTenant?.tenant.tenant_name ?? "all visible organizations";
   const selectedRangeLabel = getRangeLabel(rangeKey);
   const usageTrend = report.charts.find((chart) => chart.label === "Usage Trend")?.points ?? [];
   const improvementTrend = report.charts.find((chart) => chart.label === "Improvement Trend")?.points ?? [];
@@ -109,7 +112,7 @@ export function DashboardPage() {
           <div className="metric-card__label">Active Users</div>
           <div className="metric-card__value">{activeUsersKpi}</div>
           <div className="metric-card__trend">
-            {selectedTenant ? `Within ${selectedTenant.tenant.tenant_name}` : "Across all visible organizations"}
+            {effectiveTenant ? `Within ${effectiveTenant.tenant.tenant_name}` : "Across all visible organizations"}
           </div>
         </div>
         <div className="card metric-card">
