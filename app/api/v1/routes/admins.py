@@ -77,15 +77,36 @@ def create_admin(
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[AdminUserSummary]:
     resolved_user_id_hash = payload.user_id_hash or generate_internal_user_id_hash(payload.email)
-    admin = AdminUser(user_id_hash=resolved_user_id_hash, role=payload.role, is_active=True)
-    db.add(admin)
-    db.flush()
+    admin = db.scalar(select(AdminUser).where(AdminUser.user_id_hash == resolved_user_id_hash))
+    created_admin = admin is None
+
+    if admin is None:
+        admin = AdminUser(user_id_hash=resolved_user_id_hash, role=payload.role, is_active=True)
+        db.add(admin)
+        db.flush()
+    else:
+        admin.is_active = True
+        if payload.role == "super_admin" and admin.role != "super_admin":
+            admin.role = "super_admin"
+        elif admin.role != payload.role and admin.role != "super_admin":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"User is already assigned as {admin.role}. Update the existing admin assignment instead.",
+            )
+
     upsert_admin_profile(db, admin, payload.model_dump(mode="json"))
 
+    existing_permissions = {item.permission_key for item in admin.permissions}
     for permission in payload.permissions:
         if permission not in principal.permissions and principal.role != "super_admin":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delegate permissions you do not have")
-        db.add(AdminPermission(admin_user_id=admin.id, permission_key=permission))
+        if permission not in existing_permissions:
+            db.add(AdminPermission(admin_user_id=admin.id, permission_key=permission))
+
+    existing_scopes = {
+        (item.scope_type, item.reseller_partner_id, item.tenant_id, item.group_id)
+        for item in admin.scopes
+    }
 
     for scope in payload.scopes:
         ensure_scope_access(
@@ -94,14 +115,23 @@ def create_admin(
             tenant_id=str(scope.tenant_id) if scope.tenant_id else None,
             group_id=str(scope.group_id) if scope.group_id else None,
         )
+        scope_key = (
+            scope.scope_type,
+            str(scope.reseller_partner_id) if scope.reseller_partner_id else None,
+            str(scope.tenant_id) if scope.tenant_id else None,
+            str(scope.group_id) if scope.group_id else None,
+        )
+        if scope_key in existing_scopes:
+            continue
         db.add(AdminScope(admin_user_id=admin.id, **scope.model_dump(mode="json")))
+        existing_scopes.add(scope_key)
         if scope.tenant_id:
             refresh_onboarding_state(db, str(scope.tenant_id))
 
     write_audit_log(
         db,
         principal,
-        action_type="admin.create",
+        action_type="admin.create" if created_admin else "admin.update",
         target_type="admin_user",
         target_id=admin.id,
         after=serialize_model(admin),
