@@ -19,7 +19,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const LOGIN_URL =
   typeof import.meta !== "undefined" && import.meta.env.VITE_AUTH_LOGIN_URL
     ? String(import.meta.env.VITE_AUTH_LOGIN_URL)
-    : "http://localhost:5174/apps";
+    : "https://hermanportal-production.up.railway.app/login";
 const LAUNCH_PARAM_NAME =
   typeof import.meta !== "undefined" && import.meta.env.VITE_AUTH_LAUNCH_PARAM
     ? String(import.meta.env.VITE_AUTH_LAUNCH_PARAM)

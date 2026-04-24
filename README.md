@@ -201,6 +201,7 @@ Optional local-only header fallback:
 ```bash
 HERMAN_ADMIN_ALLOW_DEV_HEADER_AUTH=true
 HERMAN_ADMIN_ENVIRONMENT=development
+VITE_AUTH_LOGIN_URL=https://hermanportal-production.up.railway.app/login
 VITE_DEV_ADMIN_USER=local-dev-admin
 ```
 

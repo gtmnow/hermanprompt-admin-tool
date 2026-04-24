@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     auth_session_same_site: str = "lax"
     auth_session_secure: bool = False
     auth_launch_param_name: str = "launch_token"
-    auth_login_url: str = "http://localhost:5174/apps"
+    auth_login_url: str = "https://hermanportal-production.up.railway.app/login"
     allow_dev_header_auth: bool = False
     launch_secret: str = Field(
         default="test-admin-launch-secret",
