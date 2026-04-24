@@ -36,6 +36,7 @@ const permissionCatalog = [
 ] as const;
 
 type AdminPermissionPresetKey = keyof typeof adminPermissionPresets;
+type AdminPermissionPresetSelection = AdminPermissionPresetKey | "custom";
 
 type AdminEditForm = {
   display_name: string;
@@ -115,11 +116,16 @@ export function AdminsPage() {
   const [tenantAdminTenantId, setTenantAdminTenantId] = useState("");
   const [tenantAdminGroupId, setTenantAdminGroupId] = useState("");
   const [tenantAdminUserIdHash, setTenantAdminUserIdHash] = useState("");
-  const [tenantAdminPermissionPreset, setTenantAdminPermissionPreset] = useState<AdminPermissionPresetKey>("read_write");
+  const [tenantAdminPermissionPreset, setTenantAdminPermissionPreset] = useState<AdminPermissionPresetSelection>("read_write");
+  const [tenantAdminPermissions, setTenantAdminPermissions] = useState<string[]>([...adminPermissionPresets.read_write.permissions]);
+  const [tenantAdminSuccessMessage, setTenantAdminSuccessMessage] = useState<string | null>(null);
 
   const [superAdminTenantFilterId, setSuperAdminTenantFilterId] = useState("");
   const [superAdminGroupId, setSuperAdminGroupId] = useState("");
   const [superAdminUserIdHash, setSuperAdminUserIdHash] = useState("");
+  const [superAdminPermissionPreset, setSuperAdminPermissionPreset] = useState<AdminPermissionPresetSelection>("read_write");
+  const [superAdminPermissions, setSuperAdminPermissions] = useState<string[]>([...adminPermissionPresets.read_write.permissions]);
+  const [superAdminSuccessMessage, setSuperAdminSuccessMessage] = useState<string | null>(null);
 
   const [inventoryTenantFilter, setInventoryTenantFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -165,19 +171,23 @@ export function AdminsPage() {
   useEffect(() => {
     setTenantAdminGroupId("");
     setTenantAdminUserIdHash("");
+    setTenantAdminSuccessMessage(null);
   }, [tenantAdminTenantId]);
 
   useEffect(() => {
     setSuperAdminGroupId("");
     setSuperAdminUserIdHash("");
+    setSuperAdminSuccessMessage(null);
   }, [superAdminTenantFilterId]);
 
   useEffect(() => {
     setTenantAdminUserIdHash("");
+    setTenantAdminSuccessMessage(null);
   }, [tenantAdminGroupId]);
 
   useEffect(() => {
     setSuperAdminUserIdHash("");
+    setSuperAdminSuccessMessage(null);
   }, [superAdminGroupId]);
 
   const invalidateAdminQueries = async () => {
@@ -227,16 +237,21 @@ export function AdminsPage() {
       return tenantApi.createAdmin({
         user_id_hash: selectedTenantAdminUser.user_id_hash,
         role: "tenant_admin",
-        permissions: adminPermissionPresets[tenantAdminPermissionPreset].permissions,
+        permissions: tenantAdminPermissions,
         scopes: [{ scope_type: "tenant", tenant_id: tenantAdminTenantId }],
         display_name: profile.display_name,
         email: profile.email,
       });
     },
+    onMutate: async () => {
+      setTenantAdminSuccessMessage(null);
+    },
     onSuccess: async () => {
       setTenantAdminUserIdHash("");
       setTenantAdminGroupId("");
       setTenantAdminPermissionPreset("read_write");
+      setTenantAdminPermissions([...adminPermissionPresets.read_write.permissions]);
+      setTenantAdminSuccessMessage("Tenant admin assignment saved successfully.");
       await invalidateAdminQueries();
     },
   });
@@ -250,16 +265,22 @@ export function AdminsPage() {
       return tenantApi.createAdmin({
         user_id_hash: selectedSuperAdminUser.user_id_hash,
         role: "super_admin",
-        permissions: [],
+        permissions: superAdminPermissions,
         scopes: [{ scope_type: "global" }],
         display_name: profile.display_name,
         email: profile.email,
       });
     },
+    onMutate: async () => {
+      setSuperAdminSuccessMessage(null);
+    },
     onSuccess: async () => {
       setSuperAdminUserIdHash("");
       setSuperAdminGroupId("");
       setSuperAdminTenantFilterId("");
+      setSuperAdminPermissionPreset("read_write");
+      setSuperAdminPermissions([...adminPermissionPresets.read_write.permissions]);
+      setSuperAdminSuccessMessage("Super admin assignment saved successfully.");
       await invalidateAdminQueries();
     },
   });
@@ -335,6 +356,46 @@ export function AdminsPage() {
     setEditPermissionPreset("custom");
   };
 
+  const applyTenantAdminPermissionPreset = (presetKey: AdminPermissionPresetSelection) => {
+    setTenantAdminPermissionPreset(presetKey);
+    setTenantAdminSuccessMessage(null);
+    if (presetKey === "custom") {
+      return;
+    }
+    setTenantAdminPermissions([...adminPermissionPresets[presetKey].permissions]);
+  };
+
+  const toggleTenantAdminPermission = (permission: string) => {
+    setTenantAdminPermissions((current) => {
+      const permissions = current.includes(permission)
+        ? current.filter((value) => value !== permission)
+        : [...current, permission];
+      return permissions;
+    });
+    setTenantAdminPermissionPreset("custom");
+    setTenantAdminSuccessMessage(null);
+  };
+
+  const applySuperAdminPermissionPreset = (presetKey: AdminPermissionPresetSelection) => {
+    setSuperAdminPermissionPreset(presetKey);
+    setSuperAdminSuccessMessage(null);
+    if (presetKey === "custom") {
+      return;
+    }
+    setSuperAdminPermissions([...adminPermissionPresets[presetKey].permissions]);
+  };
+
+  const toggleSuperAdminPermission = (permission: string) => {
+    setSuperAdminPermissions((current) => {
+      const permissions = current.includes(permission)
+        ? current.filter((value) => value !== permission)
+        : [...current, permission];
+      return permissions;
+    });
+    setSuperAdminPermissionPreset("custom");
+    setSuperAdminSuccessMessage(null);
+  };
+
   if (tenantsQuery.isLoading || adminsQuery.isLoading) {
     return <LoadingBlock label="Loading admins..." />;
   }
@@ -366,6 +427,9 @@ export function AdminsPage() {
 
           {createTenantAdminMutation.error ? (
             <div className="section-note section-note--danger">{mutationMessage(createTenantAdminMutation.error)}</div>
+          ) : null}
+          {tenantAdminSuccessMessage ? (
+            <div className="section-note">{tenantAdminSuccessMessage}</div>
           ) : null}
 
           <div>
@@ -409,7 +473,10 @@ export function AdminsPage() {
               className="field"
               id="tenant_admin_user_id_hash"
               value={tenantAdminUserIdHash}
-              onChange={(event) => setTenantAdminUserIdHash(event.target.value)}
+              onChange={(event) => {
+                setTenantAdminUserIdHash(event.target.value);
+                setTenantAdminSuccessMessage(null);
+              }}
               disabled={!tenantAdminTenantId || tenantAdminUsersQuery.isLoading}
             >
               <option value="">{tenantAdminTenantId ? "Select user by email" : "Select organization first"}</option>
@@ -427,19 +494,36 @@ export function AdminsPage() {
               className="field"
               id="tenant_admin_permission_preset"
               value={tenantAdminPermissionPreset}
-              onChange={(event) => setTenantAdminPermissionPreset(event.target.value as AdminPermissionPresetKey)}
+              onChange={(event) => applyTenantAdminPermissionPreset(event.target.value as AdminPermissionPresetSelection)}
             >
               {Object.entries(adminPermissionPresets).map(([key, preset]) => (
                 <option key={key} value={key}>
                   {preset.label}
                 </option>
               ))}
+              <option value="custom">Custom</option>
             </select>
+          </div>
+
+          <div>
+            <div className="field-label">Permissions</div>
+            <div className="stack" style={{ gap: 10 }}>
+              {permissionCatalog.map((permission) => (
+                <label key={permission} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <input
+                    checked={tenantAdminPermissions.includes(permission)}
+                    onChange={() => toggleTenantAdminPermission(permission)}
+                    type="checkbox"
+                  />
+                  <span>{permission}</span>
+                </label>
+              ))}
+            </div>
           </div>
 
           <button
             className="primary-button"
-            disabled={!tenantAdminTenantId || !tenantAdminUserIdHash || createTenantAdminMutation.isPending}
+            disabled={!tenantAdminTenantId || !tenantAdminUserIdHash || tenantAdminPermissions.length === 0 || createTenantAdminMutation.isPending}
             onClick={() => createTenantAdminMutation.mutate()}
             type="button"
           >
@@ -459,6 +543,9 @@ export function AdminsPage() {
             {createSuperAdminMutation.error ? (
               <div className="section-note section-note--danger">{mutationMessage(createSuperAdminMutation.error)}</div>
             ) : null}
+            {superAdminSuccessMessage ? (
+              <div className="section-note">{superAdminSuccessMessage}</div>
+            ) : null}
 
             <div>
               <label className="field-label" htmlFor="super_admin_tenant_filter">Organization Filter</label>
@@ -466,7 +553,10 @@ export function AdminsPage() {
                 className="field"
                 id="super_admin_tenant_filter"
                 value={superAdminTenantFilterId}
-                onChange={(event) => setSuperAdminTenantFilterId(event.target.value)}
+                onChange={(event) => {
+                  setSuperAdminTenantFilterId(event.target.value);
+                  setSuperAdminSuccessMessage(null);
+                }}
               >
                 <option value="">All organizations</option>
                 {(tenantsQuery.data?.items ?? []).map((item) => (
@@ -483,7 +573,10 @@ export function AdminsPage() {
                 className="field"
                 id="super_admin_group_id"
                 value={superAdminGroupId}
-                onChange={(event) => setSuperAdminGroupId(event.target.value)}
+                onChange={(event) => {
+                  setSuperAdminGroupId(event.target.value);
+                  setSuperAdminSuccessMessage(null);
+                }}
                 disabled={!superAdminTenantFilterId || superAdminGroupsQuery.isLoading}
               >
                 <option value="">All groups</option>
@@ -501,7 +594,10 @@ export function AdminsPage() {
                 className="field"
                 id="super_admin_user_id_hash"
                 value={superAdminUserIdHash}
-                onChange={(event) => setSuperAdminUserIdHash(event.target.value)}
+                onChange={(event) => {
+                  setSuperAdminUserIdHash(event.target.value);
+                  setSuperAdminSuccessMessage(null);
+                }}
                 disabled={superAdminUsersQuery.isLoading}
               >
                 <option value="">Select user by email</option>
@@ -513,9 +609,42 @@ export function AdminsPage() {
               </select>
             </div>
 
+            <div>
+              <label className="field-label" htmlFor="super_admin_permission_preset">Permission Preset</label>
+              <select
+                className="field"
+                id="super_admin_permission_preset"
+                value={superAdminPermissionPreset}
+                onChange={(event) => applySuperAdminPermissionPreset(event.target.value as AdminPermissionPresetSelection)}
+              >
+                {Object.entries(adminPermissionPresets).map(([key, preset]) => (
+                  <option key={key} value={key}>
+                    {preset.label}
+                  </option>
+                ))}
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+
+            <div>
+              <div className="field-label">Permissions</div>
+              <div className="stack" style={{ gap: 10 }}>
+                {permissionCatalog.map((permission) => (
+                  <label key={permission} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <input
+                      checked={superAdminPermissions.includes(permission)}
+                      onChange={() => toggleSuperAdminPermission(permission)}
+                      type="checkbox"
+                    />
+                    <span>{permission}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <button
               className="primary-button"
-              disabled={!superAdminUserIdHash || createSuperAdminMutation.isPending}
+              disabled={!superAdminUserIdHash || superAdminPermissions.length === 0 || createSuperAdminMutation.isPending}
               onClick={() => createSuperAdminMutation.mutate()}
               type="button"
             >
