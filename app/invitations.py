@@ -184,3 +184,9 @@ def send_invitation_email(*, invitation: UserInvitation, tenant: Tenant, recipie
     invitation.sent_at = utc_now()
     invitation.provider_message_id = str(response_payload.get("id") or "")
     invitation.last_error = None
+
+
+def invitation_delivery_error(invitation: UserInvitation) -> str | None:
+    if invitation.status != "failed":
+        return None
+    return invitation.last_error or "Invitation email could not be sent"

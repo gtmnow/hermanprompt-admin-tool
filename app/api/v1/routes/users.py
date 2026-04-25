@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from uuid import NAMESPACE_URL, uuid5
 
 from app.db import get_db
-from app.invitations import create_or_replace_invitation, send_invitation_email
+from app.invitations import create_or_replace_invitation, invitation_delivery_error, send_invitation_email
 from app.models import AdminScope, AdminUser, Group, UserGroupMembership, UserTenantMembership
 from app.models import Tenant
 from app.schemas import (
@@ -247,6 +247,13 @@ def create_user_membership(
                 created_by_admin_user_id=principal.admin_id,
             )
             send_invitation_email(invitation=invitation, tenant=tenant, recipient_name=recipient_name)
+            delivery_error = invitation_delivery_error(invitation)
+            if delivery_error:
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Invitation email could not be sent: {delivery_error}",
+                )
 
     refresh_onboarding_state(db, membership.tenant_id)
     write_audit_log(
@@ -511,6 +518,13 @@ def run_user_lifecycle_action(
             created_by_admin_user_id=principal.admin_id,
         )
         send_invitation_email(invitation=invitation, tenant=tenant, recipient_name=current_display_name)
+        delivery_error = invitation_delivery_error(invitation)
+        if delivery_error:
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Invitation email could not be sent: {delivery_error}",
+            )
     else:
         deactivated_tenant = ensure_deactivated_users_tenant(db)
         target_tenant = deactivated_tenant
