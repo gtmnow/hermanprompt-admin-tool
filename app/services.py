@@ -323,10 +323,22 @@ def get_user_detail_sections(db: Session, user_id_hash: str) -> list[dict[str, o
             )
             continue
 
-        row = db.execute(
-            text(f"select * from {table_name} where user_id_hash = :user_id_hash limit 1"),
-            {"user_id_hash": user_id_hash},
-        ).mappings().first()
+        try:
+            row = db.execute(
+                text(f"select * from {table_name} where user_id_hash = :user_id_hash limit 1"),
+                {"user_id_hash": user_id_hash},
+            ).mappings().first()
+        except Exception:
+            sections.append(
+                {
+                    "key": key,
+                    "title": title,
+                    "status": "unavailable",
+                    "fields": [],
+                    "message": "This data source is present but could not be read safely.",
+                }
+            )
+            continue
 
         if row is None:
             sections.append(
@@ -340,14 +352,26 @@ def get_user_detail_sections(db: Session, user_id_hash: str) -> list[dict[str, o
             )
             continue
 
-        fields = [
-            {
-                "label": column.replace("_", " ").title(),
-                "value": format_user_detail_value(value),
-            }
-            for column, value in row.items()
-            if column not in ignored_columns and value is not None
-        ]
+        try:
+            fields = [
+                {
+                    "label": column.replace("_", " ").title(),
+                    "value": format_user_detail_value(value),
+                }
+                for column, value in row.items()
+                if column not in ignored_columns and value is not None
+            ]
+        except Exception:
+            sections.append(
+                {
+                    "key": key,
+                    "title": title,
+                    "status": "unavailable",
+                    "fields": [],
+                    "message": "This data source is present but could not be formatted safely.",
+                }
+            )
+            continue
 
         sections.append(
             {
