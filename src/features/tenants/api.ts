@@ -94,6 +94,9 @@ export const tenantApi = {
     const query = params.toString();
     return api.getList<UserMembership>(`/users${query ? `?${query}` : ""}`);
   },
+  getUserMemberships(userIdHash: string) {
+    return api.getList<UserMembership>(`/users/${encodeURIComponent(userIdHash)}`);
+  },
   updateUser(userIdHash: string, tenantId: string, payload: Record<string, unknown>) {
     return api.patchResource<UserMembership>(
       `/users/${encodeURIComponent(userIdHash)}?tenant_id=${tenantId}`,

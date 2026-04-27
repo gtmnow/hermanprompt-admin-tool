@@ -214,6 +214,11 @@ export function UsersPage() {
     queryKey: ["users-page-groups"],
     queryFn: () => tenantApi.getGroups(),
   });
+  const selectedUserDetailsQuery = useQuery({
+    queryKey: ["users-page-user-memberships", selectedUser?.user_id_hash],
+    queryFn: () => tenantApi.getUserMemberships(selectedUser!.user_id_hash),
+    enabled: Boolean(selectedUser?.user_id_hash),
+  });
   const createTenantUsersQuery = useQuery({
     queryKey: ["users-page-create-tenant-users", createUserForm.tenant_id],
     queryFn: () => tenantApi.getUsers(createUserForm.tenant_id),
@@ -234,9 +239,20 @@ export function UsersPage() {
     const groups = groupsQuery.data?.items ?? [];
     return groups.filter((group) => (tenantId === "all" ? true : group.tenant_id === tenantId));
   }, [groupsQuery.data, tenantId]);
+  const activeSelectedUser = useMemo(() => {
+    if (!selectedUser) {
+      return null;
+    }
+    const detailedItems = selectedUserDetailsQuery.data?.items ?? [];
+    return (
+      detailedItems.find((item) => item.tenant_id === selectedUser.tenant_id) ??
+      detailedItems[0] ??
+      selectedUser
+    );
+  }, [selectedUser, selectedUserDetailsQuery.data]);
   const selectedUserGroups = useMemo(
-    () => (groupsQuery.data?.items ?? []).filter((group) => group.tenant_id === selectedUser?.tenant_id),
-    [groupsQuery.data, selectedUser],
+    () => (groupsQuery.data?.items ?? []).filter((group) => group.tenant_id === activeSelectedUser?.tenant_id),
+    [activeSelectedUser, groupsQuery.data],
   );
   const createAvailableGroups = useMemo(
     () => (groupsQuery.data?.items ?? []).filter((group) => group.tenant_id === createUserForm.tenant_id),
@@ -319,10 +335,10 @@ export function UsersPage() {
 
   const updateUserMutation = useMutation({
     mutationFn: () => {
-      if (!selectedUser) {
+      if (!activeSelectedUser) {
         throw new Error("No user selected.");
       }
-      return tenantApi.updateUser(selectedUser.user_id_hash, selectedUser.tenant_id, {
+      return tenantApi.updateUser(activeSelectedUser.user_id_hash, activeSelectedUser.tenant_id, {
         first_name: userEditForm.first_name || null,
         last_name: userEditForm.last_name || null,
         email: userEditForm.email || null,
@@ -341,13 +357,13 @@ export function UsersPage() {
 
   const updateAdminRoleMutation = useMutation({
     mutationFn: () => {
-      if (!selectedUser?.admin_role?.admin_id) {
+      if (!activeSelectedUser?.admin_role?.admin_id) {
         throw new Error("This user does not currently have an admin role assignment.");
       }
       if (!userEditForm.admin_role) {
         throw new Error("Select an admin role before saving.");
       }
-      return tenantApi.updateAdmin(selectedUser.admin_role.admin_id, {
+      return tenantApi.updateAdmin(activeSelectedUser.admin_role.admin_id, {
         role: userEditForm.admin_role,
       });
     },
@@ -378,11 +394,11 @@ export function UsersPage() {
 
   const userActionMutation = useMutation({
     mutationFn: (action: UserActionKind) => {
-      if (!selectedUser) {
+      if (!activeSelectedUser) {
         throw new Error("No user selected.");
       }
-      return tenantApi.runUserAction(selectedUser.user_id_hash, {
-        tenant_id: selectedUser.tenant_id,
+      return tenantApi.runUserAction(activeSelectedUser.user_id_hash, {
+        tenant_id: activeSelectedUser.tenant_id,
         action,
       });
     },
@@ -422,6 +438,7 @@ export function UsersPage() {
   });
 
   const users = filteredUsers;
+  const dialogUser = activeSelectedUser ?? selectedUser;
   const activeUsers = users.filter((user) => statusBadgeValue(user) === "active").length;
   const withSessions = users.filter((user) => (user.profile?.sessions_count ?? 0) > 0).length;
   const visibleOrganizations = new Set(users.map((user) => user.tenant_id)).size;
@@ -840,9 +857,9 @@ export function UsersPage() {
               <div>
                 <h3 className="panel-title" id="user-status-dialog-title">Manage User</h3>
                 <div className="muted" style={{ marginTop: 6 }}>
-                  {selectedUser.profile?.email ?? "No email on file"}
+                  {dialogUser?.profile?.email ?? "No email on file"}
                 </div>
-                <div className="muted">User hash: {selectedUser.user_id_hash}</div>
+                <div className="muted">User hash: {dialogUser?.user_id_hash}</div>
               </div>
               <button className="ghost-button" type="button" onClick={closeUserDialog}>
                 Close
@@ -914,18 +931,18 @@ export function UsersPage() {
               <div className="stack" style={{ marginTop: 18 }}>
                 <div className="section-note">
                   <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                    <StatusBadge value={statusBadgeValue(selectedUser)} />
-                    <span>{selectedUser.status_summary?.detail ?? "Current user membership status."}</span>
+                    <StatusBadge value={statusBadgeValue(dialogUser ?? selectedUser)} />
+                    <span>{dialogUser?.status_summary?.detail ?? "Current user membership status."}</span>
                   </div>
                 </div>
 
-                {selectedUser.invitation_summary ? (
+                {dialogUser?.invitation_summary ? (
                   <div className="section-note">
-                    Invitation state: <strong>{selectedUser.invitation_summary.state}</strong>
-                    {selectedUser.invitation_summary.email ? ` for ${selectedUser.invitation_summary.email}` : ""}
-                    {selectedUser.invitation_summary.sent_at ? ` / sent ${formatDateTime(selectedUser.invitation_summary.sent_at)}` : ""}
-                    {selectedUser.invitation_summary.accepted_at ? ` / accepted ${formatDateTime(selectedUser.invitation_summary.accepted_at)}` : ""}
-                    {selectedUser.invitation_summary.last_error ? ` / ${selectedUser.invitation_summary.last_error}` : ""}
+                    Invitation state: <strong>{dialogUser.invitation_summary.state}</strong>
+                    {dialogUser.invitation_summary.email ? ` for ${dialogUser.invitation_summary.email}` : ""}
+                    {dialogUser.invitation_summary.sent_at ? ` / sent ${formatDateTime(dialogUser.invitation_summary.sent_at)}` : ""}
+                    {dialogUser.invitation_summary.accepted_at ? ` / accepted ${formatDateTime(dialogUser.invitation_summary.accepted_at)}` : ""}
+                    {dialogUser.invitation_summary.last_error ? ` / ${dialogUser.invitation_summary.last_error}` : ""}
                   </div>
                 ) : null}
 
@@ -1010,7 +1027,7 @@ export function UsersPage() {
 
                 <div>
                   <label className="field-label" htmlFor="manage_user_admin_role">Admin Role</label>
-                  {selectedUser.admin_role ? (
+                  {dialogUser?.admin_role ? (
                     <div className="stack" style={{ gap: 10 }}>
                       <select
                         className="field"
@@ -1027,7 +1044,7 @@ export function UsersPage() {
                         ))}
                       </select>
                       <div className="muted">
-                        Current permissions: {selectedUser.admin_role.permissions.join(", ") || "Inherited defaults only"}
+                        Current permissions: {dialogUser.admin_role.permissions.join(", ") || "Inherited defaults only"}
                       </div>
                       <div className="dialog-actions">
                         <button
@@ -1086,7 +1103,7 @@ export function UsersPage() {
                 <div className="panel panel--inset">
                   <h3 className="panel-title">Read-Only Detail Sections</h3>
                   <div className="stack" style={{ marginTop: 14 }}>
-                    {(selectedUser.detail_sections ?? []).map((section) => (
+                    {(dialogUser?.detail_sections ?? []).map((section) => (
                       <div className="section-note" key={section.key}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                           <strong>{section.title}</strong>

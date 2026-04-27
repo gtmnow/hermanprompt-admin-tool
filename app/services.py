@@ -282,8 +282,9 @@ def parse_datetime(value: str | datetime | None) -> datetime | None:
 
 def table_exists(db: Session, table_name: str) -> bool:
     try:
-        db.execute(text(f"select 1 from {table_name} limit 1"))
-        return True
+        bind = db.get_bind()
+        inspector = inspect(bind)
+        return bool(inspector.has_table(table_name, schema="public"))
     except Exception:
         return False
 
@@ -387,21 +388,13 @@ def get_user_detail_sections(db: Session, user_id_hash: str) -> list[dict[str, o
 
 
 def column_exists(db: Session, table_name: str, column_name: str) -> bool:
-    return bool(
-        db.execute(
-            text(
-                """
-                select 1
-                from information_schema.columns
-                where table_schema = 'public'
-                  and table_name = :table_name
-                  and column_name = :column_name
-                limit 1
-                """
-            ),
-            {"table_name": table_name, "column_name": column_name},
-        ).first()
-    )
+    try:
+        bind = db.get_bind()
+        inspector = inspect(bind)
+        columns = inspector.get_columns(table_name, schema="public")
+    except Exception:
+        return False
+    return any(column.get("name") == column_name for column in columns)
 
 
 def has_auth_user_credentials_table(db: Session) -> bool:

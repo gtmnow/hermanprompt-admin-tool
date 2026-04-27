@@ -161,6 +161,43 @@ def build_admin_role_summary(db: Session, user_id_hash: str) -> UserAdminRoleSum
     )
 
 
+def build_admin_role_lookup(db: Session, user_id_hashes: list[str]) -> dict[str, UserAdminRoleSummary]:
+    if not user_id_hashes or not table_exists(db, "admin_users"):
+        return {}
+
+    unique_hashes = sorted({user_id_hash for user_id_hash in user_id_hashes if user_id_hash})
+    if not unique_hashes:
+        return {}
+
+    admins = list(
+        db.scalars(
+            select(AdminUser).where(AdminUser.user_id_hash.in_(unique_hashes))
+        )
+    )
+    if not admins:
+        return {}
+
+    admin_ids = [admin.id for admin in admins]
+    permissions_by_admin_id: dict[str, list[str]] = {admin_id: [] for admin_id in admin_ids}
+    for permission in db.scalars(select(AdminPermission).where(AdminPermission.admin_user_id.in_(admin_ids))):
+        permissions_by_admin_id.setdefault(permission.admin_user_id, []).append(permission.permission_key)
+
+    scope_types_by_admin_id: dict[str, set[str]] = {admin_id: set() for admin_id in admin_ids}
+    for scope in db.scalars(select(AdminScope).where(AdminScope.admin_user_id.in_(admin_ids))):
+        scope_types_by_admin_id.setdefault(scope.admin_user_id, set()).add(scope.scope_type)
+
+    return {
+        admin.user_id_hash: UserAdminRoleSummary(
+            admin_id=admin.id,
+            role=admin.role,
+            is_active=admin.is_active,
+            permissions=permissions_by_admin_id.get(admin.id, []),
+            scope_types=sorted(scope_types_by_admin_id.get(admin.id, set())),
+        )
+        for admin in admins
+    }
+
+
 def build_detail_sections(db: Session, user_id_hash: str) -> list[UserDetailSectionSummary]:
     try:
         return [
@@ -187,7 +224,13 @@ def map_snapshot_tenant_to_visible_tenant_id(db: Session, snapshot_tenant_id: st
     return str(uuid5(NAMESPACE_URL, f"snapshot-tenant:{snapshot_tenant_id}"))
 
 
-def auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> UserMembershipSummary:
+def auth_row_to_summary(
+    db: Session,
+    row: dict[str, object],
+    tenant_id: str,
+    *,
+    include_detail_sections: bool = True,
+) -> UserMembershipSummary:
     display_name = string_value(row.get("display_name")) or ""
     first_name = display_name.split(" ", 1)[0] if display_name else None
     last_name = display_name.split(" ", 1)[1] if display_name and " " in display_name else None
@@ -245,11 +288,16 @@ def auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> 
         status_summary=build_status_summary(current_status, row, invitation),
         invitation_summary=build_invitation_summary(invitation),
         admin_role=build_admin_role_summary(db, row_user_id_hash),
-        detail_sections=build_detail_sections(db, row_user_id_hash),
+        detail_sections=build_detail_sections(db, row_user_id_hash) if include_detail_sections else [],
     )
 
 
-def to_user_summary(db: Session, membership: UserTenantMembership) -> UserMembershipSummary:
+def to_user_summary(
+    db: Session,
+    membership: UserTenantMembership,
+    *,
+    include_detail_sections: bool = True,
+) -> UserMembershipSummary:
     group_memberships = list(
         db.scalars(select(UserGroupMembership).where(UserGroupMembership.tenant_membership_id == membership.id))
     )
@@ -273,13 +321,19 @@ def to_user_summary(db: Session, membership: UserTenantMembership) -> UserMember
         status_summary=build_status_summary(membership.status, None, invitation),
         invitation_summary=build_invitation_summary(invitation),
         admin_role=build_admin_role_summary(db, membership.user_id_hash),
-        detail_sections=build_detail_sections(db, membership.user_id_hash),
+        detail_sections=build_detail_sections(db, membership.user_id_hash) if include_detail_sections else [],
     )
 
 
-def safe_auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> UserMembershipSummary:
+def safe_auth_row_to_summary(
+    db: Session,
+    row: dict[str, object],
+    tenant_id: str,
+    *,
+    include_detail_sections: bool = True,
+) -> UserMembershipSummary:
     try:
-        return auth_row_to_summary(db, row, tenant_id)
+        return auth_row_to_summary(db, row, tenant_id, include_detail_sections=include_detail_sections)
     except Exception:
         fallback_user_id_hash = string_value(row.get("user_id_hash")) or "unknown-user"
         fallback_created_at = safe_datetime(row.get("created_at")) or datetime.now(timezone.utc)
@@ -328,9 +382,14 @@ def safe_auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str
         )
 
 
-def safe_membership_to_summary(db: Session, membership: UserTenantMembership) -> UserMembershipSummary:
+def safe_membership_to_summary(
+    db: Session,
+    membership: UserTenantMembership,
+    *,
+    include_detail_sections: bool = True,
+) -> UserMembershipSummary:
     try:
-        return to_user_summary(db, membership)
+        return to_user_summary(db, membership, include_detail_sections=include_detail_sections)
     except Exception:
         fallback_created_at = membership.created_at or datetime.now(timezone.utc)
         fallback_updated_at = membership.updated_at or fallback_created_at
@@ -376,6 +435,132 @@ def safe_membership_to_summary(db: Session, membership: UserTenantMembership) ->
         )
 
 
+def auth_row_to_list_summary(
+    db: Session,
+    row: dict[str, object],
+    tenant_id: str,
+    *,
+    admin_role: UserAdminRoleSummary | None,
+) -> UserMembershipSummary:
+    display_name = string_value(row.get("display_name")) or ""
+    first_name = display_name.split(" ", 1)[0] if display_name else None
+    last_name = display_name.split(" ", 1)[1] if display_name and " " in display_name else None
+    row_user_id_hash = string_value(row.get("user_id_hash")) or "unknown-user"
+    row_tenant_id = string_value(row.get("tenant_id")) or tenant_id
+    detail_level = float(row["detail_level"]) if row.get("detail_level") is not None else None
+    utilization_level = None
+    if detail_level is not None:
+        if detail_level >= 0.7:
+            utilization_level = "high"
+        elif detail_level >= 0.4:
+            utilization_level = "medium"
+        else:
+            utilization_level = "low"
+
+    sessions_count = int(row.get("sessions_count") or 0)
+    avg_improvement_pct = int(round(float(row["structure"]) * 100)) if row.get("structure") is not None else None
+    membership = db.scalar(
+        select(UserTenantMembership).where(
+            UserTenantMembership.user_id_hash == row_user_id_hash,
+            UserTenantMembership.tenant_id == tenant_id,
+        )
+    )
+    group_memberships = (
+        list(db.scalars(select(UserGroupMembership).where(UserGroupMembership.tenant_membership_id == membership.id)))
+        if membership is not None
+        else []
+    )
+    profile = membership.profile if membership else None
+    current_status = membership.status if membership is not None else ("active" if bool(row.get("is_active")) else "inactive")
+    created_at = membership.created_at if membership is not None else safe_datetime(row.get("created_at")) or datetime.now(timezone.utc)
+    updated_at = membership.updated_at if membership is not None else safe_datetime(row.get("updated_at")) or created_at
+
+    return UserMembershipSummary(
+        id=membership.id if membership is not None else uuid5(NAMESPACE_URL, f"auth-user:{row_tenant_id}:{row_user_id_hash}"),
+        user_id_hash=row_user_id_hash,
+        tenant_id=tenant_id,
+        status=current_status,
+        is_primary=membership.is_primary if membership is not None else True,
+        created_at=created_at,
+        updated_at=updated_at,
+        group_memberships=[UserGroupMembershipSummary(group_id=item.group_id) for item in group_memberships],
+        profile=UserMembershipProfileSummary(
+            first_name=profile.first_name if profile and profile.first_name is not None else first_name,
+            last_name=profile.last_name if profile and profile.last_name is not None else last_name,
+            email=string_value(row.get("email")) if row.get("email") else profile.email if profile else None,
+            title=profile.title if profile and profile.title is not None else ("Admin" if bool(row.get("is_admin")) else "Member"),
+            initial_user_type=profile.initial_user_type if profile and profile.initial_user_type is not None else None,
+            utilization_level=profile.utilization_level if profile and profile.utilization_level is not None else utilization_level,
+            sessions_count=sessions_count,
+            avg_improvement_pct=profile.avg_improvement_pct if profile and profile.avg_improvement_pct is not None else avg_improvement_pct,
+            last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
+        ),
+        status_summary=build_status_summary(current_status, row, None),
+        invitation_summary=None,
+        admin_role=admin_role,
+        detail_sections=[],
+    )
+
+
+def membership_to_list_summary(
+    db: Session,
+    membership: UserTenantMembership,
+    *,
+    admin_role: UserAdminRoleSummary | None,
+) -> UserMembershipSummary:
+    group_memberships = list(
+        db.scalars(select(UserGroupMembership).where(UserGroupMembership.tenant_membership_id == membership.id))
+    )
+    return UserMembershipSummary(
+        id=membership.id,
+        user_id_hash=membership.user_id_hash,
+        tenant_id=membership.tenant_id,
+        status=membership.status,
+        is_primary=membership.is_primary,
+        created_at=membership.created_at,
+        updated_at=membership.updated_at,
+        group_memberships=[
+            UserGroupMembershipSummary(group_id=item.group_id) for item in group_memberships
+        ],
+        profile=(
+            UserMembershipProfileSummary.model_validate(membership.profile, from_attributes=True)
+            if membership.profile
+            else None
+        ),
+        status_summary=build_status_summary(membership.status, None, None),
+        invitation_summary=None,
+        admin_role=admin_role,
+        detail_sections=[],
+    )
+
+
+def safe_auth_row_to_list_summary(
+    db: Session,
+    row: dict[str, object],
+    tenant_id: str,
+    *,
+    admin_role: UserAdminRoleSummary | None,
+) -> UserMembershipSummary:
+    try:
+        return auth_row_to_list_summary(db, row, tenant_id, admin_role=admin_role)
+    except Exception:
+        fallback = safe_auth_row_to_summary(db, row, tenant_id, include_detail_sections=False)
+        return fallback.model_copy(update={"admin_role": admin_role})
+
+
+def safe_membership_to_list_summary(
+    db: Session,
+    membership: UserTenantMembership,
+    *,
+    admin_role: UserAdminRoleSummary | None,
+) -> UserMembershipSummary:
+    try:
+        return membership_to_list_summary(db, membership, admin_role=admin_role)
+    except Exception:
+        fallback = safe_membership_to_summary(db, membership, include_detail_sections=False)
+        return fallback.model_copy(update={"admin_role": admin_role})
+
+
 def sort_datetime_value(item: UserMembershipSummary):
     value = item.profile.last_activity_at if item.profile and item.profile.last_activity_at is not None else item.updated_at
     if getattr(value, "tzinfo", None) is None:
@@ -397,6 +582,11 @@ def list_users(
         ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id, group_id=group_id)
 
     auth_rows = get_auth_users(db)
+    memberships = list(db.scalars(select(UserTenantMembership).order_by(UserTenantMembership.created_at.desc())))
+    admin_role_lookup = build_admin_role_lookup(
+        db,
+        [string_value(row.get("user_id_hash")) or "" for row in auth_rows] + [membership.user_id_hash for membership in memberships],
+    )
     items: list[UserMembershipSummary] = []
     seen_memberships: set[tuple[str, str]] = set()
 
@@ -405,16 +595,19 @@ def list_users(
         if tenant_id and visible_tenant_id != tenant_id:
             continue
         ensure_scope_access(principal, tenant_id=visible_tenant_id, group_id=group_id)
-        item = safe_auth_row_to_summary(db, row, visible_tenant_id)
+        item = safe_auth_row_to_list_summary(
+            db,
+            row,
+            visible_tenant_id,
+            admin_role=admin_role_lookup.get(string_value(row.get("user_id_hash")) or ""),
+        )
         if group_id and not any(str(group.group_id) == group_id for group in item.group_memberships):
             continue
         items.append(item)
         seen_memberships.add((item.user_id_hash, str(item.tenant_id)))
 
-    query = select(UserTenantMembership).order_by(UserTenantMembership.created_at.desc())
     if tenant_id:
-        query = query.where(UserTenantMembership.tenant_id == tenant_id)
-    memberships = list(db.scalars(query))
+        memberships = [membership for membership in memberships if membership.tenant_id == tenant_id]
     for membership in memberships:
         ensure_scope_access(principal, tenant_id=membership.tenant_id, group_id=group_id)
         if group_id:
@@ -429,7 +622,13 @@ def list_users(
         membership_key = (membership.user_id_hash, membership.tenant_id)
         if membership_key in seen_memberships:
             continue
-        items.append(safe_membership_to_summary(db, membership))
+        items.append(
+            safe_membership_to_list_summary(
+                db,
+                membership,
+                admin_role=admin_role_lookup.get(membership.user_id_hash),
+            )
+        )
         seen_memberships.add(membership_key)
 
     items.sort(key=sort_datetime_value, reverse=True)
