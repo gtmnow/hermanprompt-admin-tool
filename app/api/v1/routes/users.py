@@ -48,6 +48,20 @@ from app.services import (
 router = APIRouter()
 
 
+def string_value(value: object | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        text_value = str(value).strip()
+    except Exception:
+        return None
+    return text_value or None
+
+
+def safe_datetime(value: object | None):
+    return parse_datetime(value) if isinstance(value, (str, datetime)) else None
+
+
 def latest_invitation_for_user(db: Session, user_id_hash: str, tenant_id: str) -> UserInvitation | None:
     if not table_exists(db, "user_invitations"):
         return None
@@ -148,10 +162,21 @@ def build_admin_role_summary(db: Session, user_id_hash: str) -> UserAdminRoleSum
 
 
 def build_detail_sections(db: Session, user_id_hash: str) -> list[UserDetailSectionSummary]:
-    return [
-        UserDetailSectionSummary.model_validate(section)
-        for section in get_user_detail_sections(db, user_id_hash)
-    ]
+    try:
+        return [
+            UserDetailSectionSummary.model_validate(section)
+            for section in get_user_detail_sections(db, user_id_hash)
+        ]
+    except Exception:
+        return [
+            UserDetailSectionSummary(
+                key="detail_sections_unavailable",
+                title="Read-Only Detail Sections",
+                status="unavailable",
+                fields=[],
+                message="User detail sections could not be loaded safely for this record.",
+            )
+        ]
 
 
 def map_snapshot_tenant_to_visible_tenant_id(db: Session, snapshot_tenant_id: str) -> str:
@@ -163,9 +188,11 @@ def map_snapshot_tenant_to_visible_tenant_id(db: Session, snapshot_tenant_id: st
 
 
 def auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> UserMembershipSummary:
-    display_name = (row.get("display_name") or "").strip()
+    display_name = string_value(row.get("display_name")) or ""
     first_name = display_name.split(" ", 1)[0] if display_name else None
     last_name = display_name.split(" ", 1)[1] if display_name and " " in display_name else None
+    row_user_id_hash = string_value(row.get("user_id_hash")) or "unknown-user"
+    row_tenant_id = string_value(row.get("tenant_id")) or tenant_id
     detail_level = float(row["detail_level"]) if row.get("detail_level") is not None else None
     utilization_level = None
     if detail_level is not None:
@@ -180,7 +207,7 @@ def auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> 
     avg_improvement_pct = int(round(float(row["structure"]) * 100)) if row.get("structure") is not None else None
     membership = db.scalar(
         select(UserTenantMembership).where(
-            UserTenantMembership.user_id_hash == str(row["user_id_hash"]),
+            UserTenantMembership.user_id_hash == row_user_id_hash,
             UserTenantMembership.tenant_id == tenant_id,
         )
     )
@@ -190,33 +217,35 @@ def auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> 
         else []
     )
     profile = membership.profile if membership else None
-    invitation = latest_invitation_for_user(db, str(row["user_id_hash"]), tenant_id)
+    invitation = latest_invitation_for_user(db, row_user_id_hash, tenant_id)
     current_status = membership.status if membership is not None else ("active" if bool(row.get("is_active")) else "inactive")
+    created_at = membership.created_at if membership is not None else safe_datetime(row.get("created_at")) or datetime.now(timezone.utc)
+    updated_at = membership.updated_at if membership is not None else safe_datetime(row.get("updated_at")) or created_at
 
     return UserMembershipSummary(
-        id=membership.id if membership is not None else uuid5(NAMESPACE_URL, f"auth-user:{row['tenant_id']}:{row['user_id_hash']}"),
-        user_id_hash=str(row["user_id_hash"]),
+        id=membership.id if membership is not None else uuid5(NAMESPACE_URL, f"auth-user:{row_tenant_id}:{row_user_id_hash}"),
+        user_id_hash=row_user_id_hash,
         tenant_id=tenant_id,
         status=current_status,
         is_primary=membership.is_primary if membership is not None else True,
-        created_at=membership.created_at if membership is not None else row["created_at"],
-        updated_at=membership.updated_at if membership is not None else row["updated_at"],
+        created_at=created_at,
+        updated_at=updated_at,
         group_memberships=[UserGroupMembershipSummary(group_id=item.group_id) for item in group_memberships],
         profile=UserMembershipProfileSummary(
             first_name=profile.first_name if profile and profile.first_name is not None else first_name,
             last_name=profile.last_name if profile and profile.last_name is not None else last_name,
-            email=str(row["email"]) if row.get("email") else profile.email if profile else None,
+            email=string_value(row.get("email")) if row.get("email") else profile.email if profile else None,
             title=profile.title if profile and profile.title is not None else ("Admin" if bool(row.get("is_admin")) else "Member"),
             initial_user_type=profile.initial_user_type if profile and profile.initial_user_type is not None else None,
             utilization_level=profile.utilization_level if profile and profile.utilization_level is not None else utilization_level,
             sessions_count=sessions_count,
             avg_improvement_pct=profile.avg_improvement_pct if profile and profile.avg_improvement_pct is not None else avg_improvement_pct,
-            last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else row.get("last_activity_at") or row.get("last_login_at"),
+            last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
         ),
         status_summary=build_status_summary(current_status, row, invitation),
         invitation_summary=build_invitation_summary(invitation),
-        admin_role=build_admin_role_summary(db, str(row["user_id_hash"])),
-        detail_sections=build_detail_sections(db, str(row["user_id_hash"])),
+        admin_role=build_admin_role_summary(db, row_user_id_hash),
+        detail_sections=build_detail_sections(db, row_user_id_hash),
     )
 
 
@@ -246,6 +275,57 @@ def to_user_summary(db: Session, membership: UserTenantMembership) -> UserMember
         admin_role=build_admin_role_summary(db, membership.user_id_hash),
         detail_sections=build_detail_sections(db, membership.user_id_hash),
     )
+
+
+def safe_auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> UserMembershipSummary:
+    try:
+        return auth_row_to_summary(db, row, tenant_id)
+    except Exception:
+        fallback_user_id_hash = string_value(row.get("user_id_hash")) or "unknown-user"
+        fallback_created_at = safe_datetime(row.get("created_at")) or datetime.now(timezone.utc)
+        fallback_updated_at = safe_datetime(row.get("updated_at")) or fallback_created_at
+        fallback_status = "active" if bool(row.get("is_active")) else "inactive"
+        fallback_email = string_value(row.get("email"))
+        fallback_display_name = string_value(row.get("display_name")) or ""
+        first_name = fallback_display_name.split(" ", 1)[0] if fallback_display_name else None
+        last_name = fallback_display_name.split(" ", 1)[1] if fallback_display_name and " " in fallback_display_name else None
+
+        return UserMembershipSummary(
+            id=uuid5(NAMESPACE_URL, f"auth-user-fallback:{tenant_id}:{fallback_user_id_hash}"),
+            user_id_hash=fallback_user_id_hash,
+            tenant_id=tenant_id,
+            status=fallback_status,
+            is_primary=True,
+            created_at=fallback_created_at,
+            updated_at=fallback_updated_at,
+            group_memberships=[],
+            profile=UserMembershipProfileSummary(
+                first_name=first_name,
+                last_name=last_name,
+                email=fallback_email,
+                title="Member",
+                initial_user_type=None,
+                utilization_level=None,
+                sessions_count=0,
+                avg_improvement_pct=None,
+                last_activity_at=safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
+            ),
+            status_summary=UserStatusSummary(
+                badge=fallback_status,
+                detail="This user record has incomplete data, so Herman Admin is showing a safe fallback view.",
+            ),
+            invitation_summary=None,
+            admin_role=None,
+            detail_sections=[
+                UserDetailSectionSummary(
+                    key="fallback_detail_unavailable",
+                    title="Read-Only Detail Sections",
+                    status="unavailable",
+                    fields=[],
+                    message="Detailed profile sections could not be assembled safely for this record.",
+                )
+            ],
+        )
 
 
 def sort_datetime_value(item: UserMembershipSummary):
