@@ -25,13 +25,14 @@ from app.services import (
     build_display_name,
     ensure_deactivated_users_tenant,
     ensure_scope_access,
+    get_canonical_user_id_hash,
     get_tenant_or_404,
     get_auth_users,
     normalize_email,
     parse_datetime,
     refresh_onboarding_state,
+    seed_foundational_profile,
     serialize_model,
-    generate_internal_user_id_hash,
     upsert_auth_user,
     upsert_user_membership_profile,
     validate_tenant_user_limit,
@@ -92,6 +93,7 @@ def auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> 
             last_name=profile.last_name if profile and profile.last_name is not None else last_name,
             email=str(row["email"]) if row.get("email") else profile.email if profile else None,
             title=profile.title if profile and profile.title is not None else ("Admin" if bool(row.get("is_admin")) else "Member"),
+            initial_user_type=profile.initial_user_type if profile and profile.initial_user_type is not None else None,
             utilization_level=profile.utilization_level if profile and profile.utilization_level is not None else utilization_level,
             sessions_count=sessions_count,
             avg_improvement_pct=profile.avg_improvement_pct if profile and profile.avg_improvement_pct is not None else avg_improvement_pct,
@@ -192,7 +194,11 @@ def create_user_membership(
 ) -> ResourceEnvelope[UserMembershipSummary]:
     tenant = get_tenant_or_404(db, str(payload.tenant_id))
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
-    resolved_user_id_hash = payload.user_id_hash or generate_internal_user_id_hash(payload.email)
+    resolved_user_id_hash = get_canonical_user_id_hash(
+        db,
+        email=payload.email,
+        explicit_user_id_hash=payload.user_id_hash,
+    )
     existing_membership = db.scalar(
         select(UserTenantMembership).where(
             UserTenantMembership.user_id_hash == resolved_user_id_hash,
@@ -222,6 +228,11 @@ def create_user_membership(
     db.add(membership)
     db.flush()
     upsert_user_membership_profile(db, membership, payload.model_dump(mode="json"))
+    seed_foundational_profile(
+        db,
+        user_id_hash=resolved_user_id_hash,
+        initial_user_type=payload.initial_user_type,
+    )
 
     for group_id in payload.group_ids:
         group = db.get(Group, str(group_id))
@@ -267,6 +278,7 @@ def create_user_membership(
                 "auth_tenant_id": auth_row.get("tenant_id"),
                 "email": auth_row.get("email"),
                 "membership_id": membership.id,
+                "initial_user_type": payload.initial_user_type,
                 "status": membership.status,
             },
             sort_keys=True,

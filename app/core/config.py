@@ -46,6 +46,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HERMAN_ADMIN_LAUNCH_AUDIENCE", "HERMANADMIN_LAUNCH_AUDIENCE"),
     )
     launch_token_use: str = "admin_launch"
+    user_hash_key: str = "dev-user-hash-key"
 
     model_config = SettingsConfigDict(
         env_prefix="HERMAN_ADMIN_",

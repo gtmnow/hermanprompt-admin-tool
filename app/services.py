@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -10,6 +12,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import bindparam, delete, func, inspect, select, text
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db import engine
 from app.models import (
     AdminAuditLog,
@@ -41,6 +44,135 @@ from app.models import (
 from app.security import Principal
 
 AUTH_USER_DISABLED_PASSWORD_HASH = "$2y$12$meGFiGyYM5aRO0bDJmpuN.gfvgLNTF/5lk/qgIiSI1/DHuy9XNoQS"
+FOUNDATIONAL_PROFILE_TABLES = ("type_detail", "final_profile")
+FOUNDATIONAL_PROFILE_FIELDS = (
+    "structure",
+    "answer_first",
+    "tone_directness",
+    "detail_level",
+    "ambiguity_reduction",
+    "exploration_level",
+    "context_loading",
+)
+SUMMARY_TYPE_PROFILE_ROWS: dict[int, dict[str, float | str | bool]] = {
+    1: {
+        "structure": 0.9,
+        "answer_first": 0.95,
+        "tone_directness": 0.8,
+        "detail_level": 0.35,
+        "ambiguity_reduction": 0.8,
+        "exploration_level": 0.2,
+        "context_loading": 0.3,
+        "prompt_enforcement_level": "none",
+        "compliance_check_enabled": False,
+        "pii_check_enabled": False,
+        "profile_version": "summary_type_1",
+    },
+    2: {
+        "structure": 0.85,
+        "answer_first": 0.75,
+        "tone_directness": 0.7,
+        "detail_level": 0.55,
+        "ambiguity_reduction": 0.8,
+        "exploration_level": 0.3,
+        "context_loading": 0.4,
+        "prompt_enforcement_level": "none",
+        "compliance_check_enabled": False,
+        "pii_check_enabled": False,
+        "profile_version": "summary_type_2",
+    },
+    3: {
+        "structure": 0.75,
+        "answer_first": 0.7,
+        "tone_directness": 0.65,
+        "detail_level": 0.75,
+        "ambiguity_reduction": 0.85,
+        "exploration_level": 0.35,
+        "context_loading": 0.55,
+        "prompt_enforcement_level": "none",
+        "compliance_check_enabled": False,
+        "pii_check_enabled": False,
+        "profile_version": "summary_type_3",
+    },
+    4: {
+        "structure": 0.6,
+        "answer_first": 0.65,
+        "tone_directness": 0.5,
+        "detail_level": 0.8,
+        "ambiguity_reduction": 0.75,
+        "exploration_level": 0.45,
+        "context_loading": 0.7,
+        "prompt_enforcement_level": "none",
+        "compliance_check_enabled": False,
+        "pii_check_enabled": False,
+        "profile_version": "summary_type_4",
+    },
+    5: {
+        "structure": 0.45,
+        "answer_first": 0.4,
+        "tone_directness": 0.45,
+        "detail_level": 0.6,
+        "ambiguity_reduction": 0.55,
+        "exploration_level": 0.75,
+        "context_loading": 0.7,
+        "prompt_enforcement_level": "none",
+        "compliance_check_enabled": False,
+        "pii_check_enabled": False,
+        "profile_version": "summary_type_5",
+    },
+    6: {
+        "structure": 0.35,
+        "answer_first": 0.35,
+        "tone_directness": 0.4,
+        "detail_level": 0.45,
+        "ambiguity_reduction": 0.4,
+        "exploration_level": 0.9,
+        "context_loading": 0.8,
+        "prompt_enforcement_level": "none",
+        "compliance_check_enabled": False,
+        "pii_check_enabled": False,
+        "profile_version": "summary_type_6",
+    },
+    7: {
+        "structure": 0.7,
+        "answer_first": 0.8,
+        "tone_directness": 0.85,
+        "detail_level": 0.5,
+        "ambiguity_reduction": 0.9,
+        "exploration_level": 0.2,
+        "context_loading": 0.45,
+        "prompt_enforcement_level": "none",
+        "compliance_check_enabled": False,
+        "pii_check_enabled": False,
+        "profile_version": "summary_type_7",
+    },
+    8: {
+        "structure": 0.55,
+        "answer_first": 0.55,
+        "tone_directness": 0.35,
+        "detail_level": 0.85,
+        "ambiguity_reduction": 0.65,
+        "exploration_level": 0.55,
+        "context_loading": 0.8,
+        "prompt_enforcement_level": "none",
+        "compliance_check_enabled": False,
+        "pii_check_enabled": False,
+        "profile_version": "summary_type_8",
+    },
+    9: {
+        "structure": 0.25,
+        "answer_first": 0.25,
+        "tone_directness": 0.3,
+        "detail_level": 0.3,
+        "ambiguity_reduction": 0.35,
+        "exploration_level": 0.85,
+        "context_loading": 0.35,
+        "prompt_enforcement_level": "none",
+        "compliance_check_enabled": False,
+        "pii_check_enabled": False,
+        "profile_version": "summary_type_9",
+    },
+}
 
 SERVICE_TIER_SEED_DATA = [
     {
@@ -415,6 +547,11 @@ def ensure_additive_schema_extensions() -> None:
 
         if "tenant_portal_configs" not in existing_tables:
             TenantPortalConfig.__table__.create(bind=connection)
+
+        if "user_membership_profiles" in existing_tables:
+            profile_columns = {column["name"] for column in inspector.get_columns("user_membership_profiles")}
+            if "initial_user_type" not in profile_columns:
+                connection.execute(text("ALTER TABLE user_membership_profiles ADD COLUMN initial_user_type INTEGER"))
 
         if "tenant_llm_config" in existing_tables:
             existing_columns = {column["name"] for column in inspector.get_columns("tenant_llm_config")}
@@ -946,16 +1083,128 @@ def upsert_auth_user(
     return dict(row) if row else {}
 
 
+def get_canonical_user_id_hash(
+    db: Session,
+    *,
+    email: str | None = None,
+    explicit_user_id_hash: str | None = None,
+) -> str:
+    if explicit_user_id_hash and explicit_user_id_hash.strip():
+        return explicit_user_id_hash.strip()
+
+    normalized_email = normalize_email(email)
+    if normalized_email is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
+
+    existing = db.execute(
+        text("select user_id_hash from auth_users where lower(email) = :email order by id desc limit 1"),
+        {"email": normalized_email},
+    ).scalar_one_or_none()
+    if existing:
+        return str(existing)
+
+    return generate_internal_user_id_hash(normalized_email)
+
+
 def generate_internal_user_id_hash(email: str | None = None) -> str:
-    normalized_email = normalize_email(email) if email else None
-    base_label = "user"
-    if normalized_email:
-        email_local = normalized_email.split("@", 1)[0]
-        candidate = re.sub(r"[^a-z0-9]+", "-", email_local.lower()).strip("-")
-        if candidate:
-            base_label = candidate[:40]
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    return f"user-{timestamp}-{base_label}-{uuid4().hex[:8]}"
+    normalized_email = normalize_email(email)
+    if normalized_email is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
+
+    digest = hmac.new(
+        get_settings().user_hash_key.encode("utf-8"),
+        normalized_email.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return digest[:24]
+
+
+def foundational_profile_for_user_type(initial_user_type: int) -> dict[str, float | str | bool]:
+    try:
+        return dict(SUMMARY_TYPE_PROFILE_ROWS[initial_user_type])
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid initial user type") from exc
+
+
+def seed_foundational_profile(
+    db: Session,
+    *,
+    user_id_hash: str,
+    initial_user_type: int,
+) -> None:
+    template = foundational_profile_for_user_type(initial_user_type)
+
+    for table_name in FOUNDATIONAL_PROFILE_TABLES:
+        if not table_exists(db, table_name):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Required profile table '{table_name}' is not available.",
+            )
+
+        existing = db.execute(
+            text(f"select user_id_hash from {table_name} where user_id_hash = :user_id_hash"),
+            {"user_id_hash": user_id_hash},
+        ).scalar_one_or_none()
+
+        payload = {"user_id_hash": user_id_hash, **template}
+        if existing:
+            db.execute(
+                text(
+                    f"""
+                    update {table_name}
+                    set
+                      structure = :structure,
+                      answer_first = :answer_first,
+                      tone_directness = :tone_directness,
+                      detail_level = :detail_level,
+                      ambiguity_reduction = :ambiguity_reduction,
+                      exploration_level = :exploration_level,
+                      context_loading = :context_loading,
+                      prompt_enforcement_level = :prompt_enforcement_level,
+                      compliance_check_enabled = :compliance_check_enabled,
+                      pii_check_enabled = :pii_check_enabled,
+                      profile_version = :profile_version,
+                      updated_at = CURRENT_TIMESTAMP
+                    where user_id_hash = :user_id_hash
+                    """
+                ),
+                payload,
+            )
+        else:
+            db.execute(
+                text(
+                    f"""
+                    insert into {table_name} (
+                      user_id_hash,
+                      structure,
+                      answer_first,
+                      tone_directness,
+                      detail_level,
+                      ambiguity_reduction,
+                      exploration_level,
+                      context_loading,
+                      prompt_enforcement_level,
+                      compliance_check_enabled,
+                      pii_check_enabled,
+                      profile_version
+                    ) values (
+                      :user_id_hash,
+                      :structure,
+                      :answer_first,
+                      :tone_directness,
+                      :detail_level,
+                      :ambiguity_reduction,
+                      :exploration_level,
+                      :context_loading,
+                      :prompt_enforcement_level,
+                      :compliance_check_enabled,
+                      :pii_check_enabled,
+                      :profile_version
+                    )
+                    """
+                ),
+                payload,
+            )
 
 
 def ensure_deactivated_users_tenant(db: Session) -> Tenant:
@@ -2064,6 +2313,7 @@ def upsert_user_membership_profile(
         "last_name",
         "email",
         "title",
+        "initial_user_type",
         "utilization_level",
         "sessions_count",
         "avg_improvement_pct",

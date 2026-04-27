@@ -4,6 +4,7 @@ export type ParsedImportedUser = {
   last_name: string;
   email: string;
   title: string;
+  initial_user_type: number;
   status: "invited" | "active" | "inactive" | "suspended";
   group_name: string;
 };
@@ -19,6 +20,9 @@ const headerAliases: Record<string, keyof ParsedImportedUser> = {
   email: "email",
   title: "title",
   role: "title",
+  initial_user_type: "initial_user_type",
+  user_type: "initial_user_type",
+  summary_type: "initial_user_type",
   status: "status",
   group: "group_name",
   group_name: "group_name",
@@ -26,10 +30,6 @@ const headerAliases: Record<string, keyof ParsedImportedUser> = {
 
 function normalizeHeader(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
-}
-
-function sanitizeSeed(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 36);
 }
 
 function detectDelimiter(line: string) {
@@ -51,9 +51,12 @@ function toStatus(value: string): ParsedImportedUser["status"] {
   return "invited";
 }
 
-function deriveUserHash(email: string, firstName: string, lastName: string, index: number) {
-  const seed = sanitizeSeed(email || `${firstName}-${lastName}` || `imported-user-${index + 1}`);
-  return seed || `imported-user-${index + 1}`;
+function toInitialUserType(value: string): number {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 9) {
+    return parsed;
+  }
+  return 1;
 }
 
 export function parseImportedUsers(text: string): ParsedImportedUser[] {
@@ -76,12 +79,12 @@ export function parseImportedUsers(text: string): ParsedImportedUser[] {
 
   const headers: Array<keyof ParsedImportedUser | null> = hasHeader
     ? firstCells.map((cell) => headerAliases[normalizeHeader(cell)] ?? null)
-    : ["email", "first_name", "last_name", "title", "group_name", "status", "user_id_hash"];
+    : ["email", "first_name", "last_name", "title", "group_name", "status", "user_id_hash", "initial_user_type"];
 
   const dataLines = hasHeader ? lines.slice(1) : lines;
 
   return dataLines
-    .map((line, index) => {
+    .map((line) => {
       const cells = splitLine(line, delimiter);
       const mapped: Partial<ParsedImportedUser> = {};
 
@@ -96,9 +99,10 @@ export function parseImportedUsers(text: string): ParsedImportedUser[] {
       const first_name = (mapped.first_name ?? "").trim();
       const last_name = (mapped.last_name ?? "").trim();
       const title = (mapped.title ?? "").trim();
+      const initial_user_type = toInitialUserType(String(mapped.initial_user_type ?? "").trim());
       const group_name = (mapped.group_name ?? "").trim();
       const status = toStatus((mapped.status ?? "").trim().toLowerCase());
-      const user_id_hash = ((mapped.user_id_hash ?? "").trim() || deriveUserHash(email, first_name, last_name, index));
+      const user_id_hash = (mapped.user_id_hash ?? "").trim();
 
       if (!email && !user_id_hash) {
         return null;
@@ -110,6 +114,7 @@ export function parseImportedUsers(text: string): ParsedImportedUser[] {
         last_name,
         email,
         title,
+        initial_user_type,
         status,
         group_name,
       };

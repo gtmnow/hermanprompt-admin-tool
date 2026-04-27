@@ -262,7 +262,7 @@ export function UsersPage() {
       for (const row of parsedImportRows) {
         const groupId = row.group_name ? groupIdByName.get(row.group_name.trim().toLowerCase()) : undefined;
         await tenantApi.createUser({
-          user_id_hash: row.user_id_hash,
+          ...(row.user_id_hash ? { user_id_hash: row.user_id_hash } : {}),
           tenant_id: importTenantId,
           group_ids: groupId ? [groupId] : [],
           status: row.status,
@@ -271,6 +271,7 @@ export function UsersPage() {
           last_name: row.last_name || null,
           email: row.email || null,
           title: row.title || null,
+          initial_user_type: row.initial_user_type,
         });
       }
     },
@@ -351,7 +352,7 @@ export function UsersPage() {
         <div className="split-header users-page__filters">
           <div>
             <h3 className="panel-title">Bulk Import Users</h3>
-            <div className="muted">Paste CSV or tab-separated rows with headers like `email,first_name,last_name,title,group_name,status,user_id_hash`.</div>
+            <div className="muted">Paste CSV or tab-separated rows with headers like `email,first_name,last_name,title,group_name,status,user_id_hash,initial_user_type`.</div>
           </div>
         </div>
 

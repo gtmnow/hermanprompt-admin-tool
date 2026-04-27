@@ -36,11 +36,11 @@ const defaultGroupForm = {
 };
 
 const defaultUserForm = {
-  user_id_hash: "",
   first_name: "",
   last_name: "",
   email: "",
   title: "",
+  initial_user_type: 1,
   status: "invited" as UserMembership["status"],
 };
 
@@ -161,7 +161,6 @@ export function OrganizationUsersTab() {
   const createUserMutation = useMutation({
     mutationFn: () =>
       tenantApi.createUser({
-        user_id_hash: userForm.user_id_hash,
         tenant_id: tenantId,
         group_ids: selectedGroupId ? [selectedGroupId] : [],
         status: userForm.status,
@@ -170,6 +169,7 @@ export function OrganizationUsersTab() {
         last_name: userForm.last_name || null,
         email: userForm.email || null,
         title: userForm.title || null,
+        initial_user_type: userForm.initial_user_type,
       }),
     onSuccess: async () => {
       setUserForm(defaultUserForm);
@@ -234,6 +234,23 @@ export function OrganizationUsersTab() {
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
               <option value="suspended">Suspended</option>
+            </select>
+          </div>
+          <div>
+            <label className="field-label" htmlFor="org_user_initial_type">Initial User Type</label>
+            <select
+              className="field"
+              id="org_user_initial_type"
+              value={String(userForm.initial_user_type)}
+              onChange={(event) =>
+                setUserForm((current) => ({ ...current, initial_user_type: Number(event.target.value) }))
+              }
+            >
+              {Array.from({ length: 9 }, (_, index) => index + 1).map((value) => (
+                <option key={value} value={value}>
+                  Type {value}
+                </option>
+              ))}
             </select>
           </div>
         </div>

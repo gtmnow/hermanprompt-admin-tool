@@ -164,11 +164,11 @@ const defaultGroupForm = {
 };
 
 const defaultUserForm = {
-  user_id_hash: "",
   first_name: "",
   last_name: "",
   email: "",
   title: "",
+  initial_user_type: 1,
 };
 
 const defaultAdminForm = {
@@ -193,18 +193,6 @@ const adminPermissionPresets = {
 } as const;
 
 type AdminPermissionPresetKey = keyof typeof adminPermissionPresets;
-
-function buildGeneratedUserId(sequence: number, now = new Date()) {
-  const timestamp = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-    String(now.getHours()).padStart(2, "0"),
-    String(now.getMinutes()).padStart(2, "0"),
-    String(now.getSeconds()).padStart(2, "0"),
-  ].join("");
-  return `user-${timestamp}-${String(sequence).padStart(4, "0")}`;
-}
 
 function withCurrentOption(options: string[], currentValue?: string | null) {
   if (!currentValue || options.includes(currentValue)) {
@@ -531,7 +519,6 @@ export function ActivationWizardPage() {
   const createUserMutation = useMutation({
     mutationFn: () =>
       tenantApi.createUser({
-        user_id_hash: userForm.user_id_hash,
         tenant_id: tenantId,
         group_ids: userGroupId ? [userGroupId] : [],
         status: "invited",
@@ -541,11 +528,11 @@ export function ActivationWizardPage() {
         last_name: userForm.last_name,
         email: userForm.email,
         title: userForm.title,
+        initial_user_type: userForm.initial_user_type,
       }),
     onSuccess: async (result) => {
       setUserForm({
         ...defaultUserForm,
-        user_id_hash: buildGeneratedUserId((usersQuery.data?.items.length ?? 0) + 2),
       });
       setUserGroupId("");
       await queryClient.invalidateQueries({ queryKey: ["activation-users", tenantId] });
@@ -570,7 +557,7 @@ export function ActivationWizardPage() {
       for (const row of parsedBulkUsers) {
         const groupId = row.group_name ? groupIdByName.get(row.group_name.trim().toLowerCase()) : undefined;
         const result = await tenantApi.createUser({
-          user_id_hash: row.user_id_hash,
+          ...(row.user_id_hash ? { user_id_hash: row.user_id_hash } : {}),
           tenant_id: tenantId,
           group_ids: groupId ? [groupId] : [],
           status: row.status,
@@ -580,6 +567,7 @@ export function ActivationWizardPage() {
           last_name: row.last_name || null,
           email: row.email || null,
           title: row.title || null,
+          initial_user_type: row.initial_user_type,
         });
         createdUsers.push(result.resource);
       }
@@ -659,10 +647,6 @@ export function ActivationWizardPage() {
   const isMinimalActivationMode = ["managed_service", "guided_activation", "hybrid"].includes(
     form.watch("service_mode") || activeTenant?.profile?.service_mode || "",
   );
-  const generatedUserId = useMemo(
-    () => buildGeneratedUserId((usersQuery.data?.items.length ?? 0) + 1),
-    [usersQuery.data?.items.length],
-  );
   const onboardingBlockers = [
     !onboarding?.tenant_created ? "Save the organization record" : null,
     !isMinimalActivationMode && !onboarding?.llm_configured ? "Save the LLM configuration" : null,
@@ -670,19 +654,6 @@ export function ActivationWizardPage() {
     !onboarding?.users_uploaded ? "Ensure at least one user is available" : null,
     !onboarding?.admin_assigned ? "Assign a tenant admin" : null,
   ].filter((value): value is string => Boolean(value));
-
-  useEffect(() => {
-    if (hasDetectedUsers) {
-      return;
-    }
-
-    setUserForm((current) => {
-      if (!current.user_id_hash || current.user_id_hash.startsWith("user-")) {
-        return { ...current, user_id_hash: generatedUserId };
-      }
-      return current;
-    });
-  }, [generatedUserId, hasDetectedUsers]);
 
   const modelOptions = modelOptionsByProvider[llmForm.provider_type] ?? [];
   const platformManagedOptions = platformManagedLlmsQuery.data?.items ?? [];
@@ -1594,6 +1565,26 @@ export function ActivationWizardPage() {
                     />
                     <div className="field-tip">Use a work email so this person can be selected easily in Admin Setup.</div>
                   </div>
+                  <div>
+                    <label className="field-label" htmlFor="user_initial_type">
+                      Initial User Type
+                    </label>
+                    <select
+                      className="field"
+                      id="user_initial_type"
+                      value={String(userForm.initial_user_type)}
+                      onChange={(event) =>
+                        setUserForm((current) => ({ ...current, initial_user_type: Number(event.target.value) }))
+                      }
+                    >
+                      {Array.from({ length: 9 }, (_, index) => index + 1).map((value) => (
+                        <option key={value} value={value}>
+                          Type {value}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="field-tip">Seeds the foundational profile immediately, before CQI data exists.</div>
+                  </div>
                 </div>
 
                 <div className="field-row field-row--three">
@@ -1649,7 +1640,7 @@ export function ActivationWizardPage() {
                 <div className="panel panel--inset">
                   <h3 className="panel-title">Bulk Import</h3>
                   <div className="muted" style={{ marginTop: 8, marginBottom: 16 }}>
-                    Supported headers include `email,first_name,last_name,title,group_name,status,user_id_hash`.
+                    Supported headers include `email,first_name,last_name,title,group_name,status,user_id_hash,initial_user_type`.
                   </div>
                   <textarea
                     className="field"

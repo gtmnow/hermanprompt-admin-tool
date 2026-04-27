@@ -192,6 +192,7 @@ export type UserMembership = {
     last_name: string | null;
     email: string | null;
     title: string | null;
+    initial_user_type: number | null;
     utilization_level: string | null;
     sessions_count: number;
     avg_improvement_pct: number | null;

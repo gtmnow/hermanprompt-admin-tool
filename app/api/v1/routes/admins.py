@@ -9,8 +9,8 @@ from app.schemas.admins import AdminPermissionSummary, AdminProfileSummary, Admi
 from app.security import Principal, require_permission
 from app.services import (
     ensure_scope_access,
+    get_canonical_user_id_hash,
     get_admin_or_404,
-    generate_internal_user_id_hash,
     refresh_onboarding_state,
     serialize_model,
     upsert_admin_profile,
@@ -76,7 +76,11 @@ def create_admin(
     principal: Principal = Depends(require_permission("admins.create")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[AdminUserSummary]:
-    resolved_user_id_hash = payload.user_id_hash or generate_internal_user_id_hash(payload.email)
+    resolved_user_id_hash = get_canonical_user_id_hash(
+        db,
+        email=payload.email,
+        explicit_user_id_hash=payload.user_id_hash,
+    )
     admin = db.scalar(select(AdminUser).where(AdminUser.user_id_hash == resolved_user_id_hash))
     created_admin = admin is None
 

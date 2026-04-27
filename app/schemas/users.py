@@ -13,6 +13,7 @@ class UserMembershipCreate(BaseModel):
     user_id_hash: str | None = Field(default=None, min_length=1, max_length=200)
     tenant_id: UUID
     group_ids: list[UUID] = Field(default_factory=list)
+    initial_user_type: int = Field(ge=1, le=9)
     status: UserStatus = "invited"
     send_invite: bool = True
     is_primary: bool = True
@@ -49,6 +50,7 @@ class UserMembershipProfileSummary(BaseModel):
     last_name: str | None = None
     email: str | None = None
     title: str | None = None
+    initial_user_type: int | None = None
     utilization_level: str | None = None
     sessions_count: int = 0
     avg_improvement_pct: int | None = None
