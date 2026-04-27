@@ -83,9 +83,16 @@ export const tenantApi = {
   listOnboarding() {
     return api.getList<TenantOnboarding>("/onboarding/tenants");
   },
-  getUsers(tenantId?: string) {
-    const query = tenantId ? `?tenant_id=${tenantId}` : "";
-    return api.getList<UserMembership>(`/users${query}`);
+  getUsers(tenantId?: string, groupId?: string) {
+    const params = new URLSearchParams();
+    if (tenantId) {
+      params.set("tenant_id", tenantId);
+    }
+    if (groupId) {
+      params.set("group_id", groupId);
+    }
+    const query = params.toString();
+    return api.getList<UserMembership>(`/users${query ? `?${query}` : ""}`);
   },
   updateUser(userIdHash: string, tenantId: string, payload: Record<string, unknown>) {
     return api.patchResource<UserMembership>(

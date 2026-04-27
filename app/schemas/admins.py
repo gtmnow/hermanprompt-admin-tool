@@ -25,6 +25,7 @@ class AdminCreate(BaseModel):
 
 
 class AdminUpdate(BaseModel):
+    role: str | None = Field(default=None, min_length=1, max_length=50)
     is_active: bool | None = None
     permissions: list[str] | None = None
     scopes: list[AdminScopeAssignment] | None = None

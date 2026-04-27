@@ -157,6 +157,12 @@ def update_admin(
     admin = get_admin_or_404(db, admin_id)
     before = serialize_model(admin)
 
+    if payload.role is not None:
+        if admin.role == "super_admin" and principal.role != "super_admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only a super admin may change a super admin role")
+        if payload.role == "super_admin" and principal.role != "super_admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only a super admin may assign the super admin role")
+        admin.role = payload.role
     if payload.is_active is not None:
         admin.is_active = payload.is_active
     profile_updates = {

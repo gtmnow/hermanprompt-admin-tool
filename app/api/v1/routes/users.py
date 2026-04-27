@@ -1,4 +1,4 @@
-from datetime import timezone
+from datetime import datetime, timezone
 import json
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -8,14 +8,18 @@ from uuid import NAMESPACE_URL, uuid5
 
 from app.db import get_db
 from app.invitations import create_or_replace_invitation, invitation_delivery_error, send_invitation_email
-from app.models import AdminScope, AdminUser, Group, UserGroupMembership, UserTenantMembership
+from app.models import AdminPermission, AdminScope, AdminUser, Group, UserGroupMembership, UserInvitation, UserTenantMembership
 from app.models import Tenant
 from app.schemas import (
     ListEnvelope,
     ResourceEnvelope,
+    UserAdminRoleSummary,
+    UserDetailSectionSummary,
+    UserInvitationSummary,
     UserLifecycleActionRequest,
     UserMembershipCreate,
     UserMembershipSummary,
+    UserStatusSummary,
     UserMembershipUpdate,
 )
 from app.schemas.users import UserGroupMembershipSummary, UserMembershipProfileSummary
@@ -33,6 +37,8 @@ from app.services import (
     refresh_onboarding_state,
     seed_foundational_profile,
     serialize_model,
+    get_user_detail_sections,
+    table_exists,
     upsert_auth_user,
     upsert_user_membership_profile,
     validate_tenant_user_limit,
@@ -40,6 +46,112 @@ from app.services import (
 )
 
 router = APIRouter()
+
+
+def latest_invitation_for_user(db: Session, user_id_hash: str, tenant_id: str) -> UserInvitation | None:
+    if not table_exists(db, "user_invitations"):
+        return None
+    invitations = list(
+        db.scalars(
+            select(UserInvitation)
+            .where(
+                UserInvitation.user_id_hash == user_id_hash,
+                UserInvitation.tenant_id == tenant_id,
+            )
+            .order_by(UserInvitation.created_at.desc())
+        )
+    )
+    return invitations[0] if invitations else None
+
+
+def invitation_state(invitation: UserInvitation) -> str:
+    now = datetime.now(timezone.utc)
+    if invitation.accepted_at is not None:
+        return "accepted"
+    if invitation.revoked_at is not None:
+        return "revoked"
+    if invitation.expires_at is not None:
+        invitation_expiry = invitation.expires_at.astimezone(timezone.utc) if invitation.expires_at.tzinfo else invitation.expires_at.replace(tzinfo=timezone.utc)
+        if invitation_expiry < now:
+            return "expired"
+    if invitation.status == "sent" or invitation.sent_at is not None:
+        return "sent"
+    if invitation.status == "failed":
+        return "failed"
+    return invitation.status or "pending"
+
+
+def build_invitation_summary(invitation: UserInvitation | None) -> UserInvitationSummary | None:
+    if invitation is None:
+        return None
+    return UserInvitationSummary(
+        state=invitation_state(invitation),
+        email=invitation.email,
+        sent_at=invitation.sent_at,
+        accepted_at=invitation.accepted_at,
+        expires_at=invitation.expires_at,
+        revoked_at=invitation.revoked_at,
+        last_error=invitation.last_error,
+    )
+
+
+def build_status_summary(
+    membership_status: str,
+    auth_row: dict[str, object] | None,
+    invitation: UserInvitation | None,
+) -> UserStatusSummary:
+    detail: str | None = None
+    badge = membership_status
+
+    if membership_status in {"active", "inactive"} and auth_row is not None:
+        badge = "active" if bool(auth_row.get("is_active")) else "inactive"
+        if badge != membership_status:
+            detail = "Membership and login state do not currently match."
+
+    if invitation is not None:
+        current_invitation_state = invitation_state(invitation)
+        invitation_details = {
+            "accepted": "Invitation accepted.",
+            "revoked": "Invitation revoked.",
+            "expired": "Invitation expired.",
+            "sent": "Invitation sent.",
+            "pending": "Invitation pending.",
+            "failed": "Invitation delivery failed.",
+        }
+        if membership_status == "invited" or current_invitation_state in invitation_details:
+            detail = invitation_details.get(current_invitation_state, detail)
+
+    if membership_status == "deleted":
+        detail = "This user has been moved into the deactivated-users flow."
+
+    return UserStatusSummary(badge=badge, detail=detail)
+
+
+def build_admin_role_summary(db: Session, user_id_hash: str) -> UserAdminRoleSummary | None:
+    if not table_exists(db, "admin_users"):
+        return None
+    admin = db.scalar(select(AdminUser).where(AdminUser.user_id_hash == user_id_hash))
+    if admin is None:
+        return None
+    permissions = [
+        item.permission_key
+        for item in db.scalars(select(AdminPermission).where(AdminPermission.admin_user_id == admin.id))
+    ]
+    scopes = list(db.scalars(select(AdminScope).where(AdminScope.admin_user_id == admin.id)))
+    return UserAdminRoleSummary(
+        admin_id=admin.id,
+        role=admin.role,
+        is_active=admin.is_active,
+        permissions=permissions,
+        scope_types=sorted({scope.scope_type for scope in scopes}),
+    )
+
+
+def build_detail_sections(db: Session, user_id_hash: str) -> list[UserDetailSectionSummary]:
+    return [
+        UserDetailSectionSummary.model_validate(section)
+        for section in get_user_detail_sections(db, user_id_hash)
+    ]
 
 
 def map_snapshot_tenant_to_visible_tenant_id(db: Session, snapshot_tenant_id: str) -> str:
@@ -78,12 +190,14 @@ def auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> 
         else []
     )
     profile = membership.profile if membership else None
+    invitation = latest_invitation_for_user(db, str(row["user_id_hash"]), tenant_id)
+    current_status = membership.status if membership is not None else ("active" if bool(row.get("is_active")) else "inactive")
 
     return UserMembershipSummary(
         id=membership.id if membership is not None else uuid5(NAMESPACE_URL, f"auth-user:{row['tenant_id']}:{row['user_id_hash']}"),
         user_id_hash=str(row["user_id_hash"]),
         tenant_id=tenant_id,
-        status=membership.status if membership is not None else ("active" if bool(row.get("is_active")) else "inactive"),
+        status=current_status,
         is_primary=membership.is_primary if membership is not None else True,
         created_at=membership.created_at if membership is not None else row["created_at"],
         updated_at=membership.updated_at if membership is not None else row["updated_at"],
@@ -99,6 +213,10 @@ def auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str) -> 
             avg_improvement_pct=profile.avg_improvement_pct if profile and profile.avg_improvement_pct is not None else avg_improvement_pct,
             last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else row.get("last_activity_at") or row.get("last_login_at"),
         ),
+        status_summary=build_status_summary(current_status, row, invitation),
+        invitation_summary=build_invitation_summary(invitation),
+        admin_role=build_admin_role_summary(db, str(row["user_id_hash"])),
+        detail_sections=build_detail_sections(db, str(row["user_id_hash"])),
     )
 
 
@@ -106,6 +224,7 @@ def to_user_summary(db: Session, membership: UserTenantMembership) -> UserMember
     group_memberships = list(
         db.scalars(select(UserGroupMembership).where(UserGroupMembership.tenant_membership_id == membership.id))
     )
+    invitation = latest_invitation_for_user(db, membership.user_id_hash, membership.tenant_id)
     return UserMembershipSummary(
         id=membership.id,
         user_id_hash=membership.user_id_hash,
@@ -122,6 +241,10 @@ def to_user_summary(db: Session, membership: UserTenantMembership) -> UserMember
             if membership.profile
             else None
         ),
+        status_summary=build_status_summary(membership.status, None, invitation),
+        invitation_summary=build_invitation_summary(invitation),
+        admin_role=build_admin_role_summary(db, membership.user_id_hash),
+        detail_sections=build_detail_sections(db, membership.user_id_hash),
     )
 
 
@@ -319,7 +442,7 @@ def get_user_memberships(
     return ListEnvelope[UserMembershipSummary](items=items, page=1, page_size=len(items) or 1, total_count=len(items), filters={"user_id_hash": user_id_hash})
 
 
-@router.patch("/{user_id_hash}", response_model=ListEnvelope[UserMembershipSummary])
+@router.patch("/{user_id_hash}", response_model=ResourceEnvelope[UserMembershipSummary])
 def update_user_membership(
     user_id_hash: str,
     payload: UserMembershipUpdate,
@@ -442,8 +565,8 @@ def update_user_membership(
     reloaded_auth_row = next((row for row in get_auth_users(db, user_id_hash) if str(row["tenant_id"]) in auth_tenant_candidates(tenant)), None)
     if reloaded_auth_row is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Auth user could not be reloaded")
-    items = [auth_row_to_summary(db, reloaded_auth_row, tenant.id)]
-    return ListEnvelope[UserMembershipSummary](items=items, page=1, page_size=1, total_count=1, filters={"user_id_hash": user_id_hash, "tenant_id": tenant_id})
+    resource = auth_row_to_summary(db, reloaded_auth_row, tenant.id)
+    return ResourceEnvelope[UserMembershipSummary](resource=resource, updated_at=resource.updated_at)
 
 
 @router.post("/{user_id_hash}/actions", response_model=ResourceEnvelope[UserMembershipSummary])

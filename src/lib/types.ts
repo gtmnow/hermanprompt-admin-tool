@@ -198,6 +198,36 @@ export type UserMembership = {
     avg_improvement_pct: number | null;
     last_activity_at: string | null;
   } | null;
+  status_summary?: {
+    badge: string;
+    detail: string | null;
+  } | null;
+  invitation_summary?: {
+    state: string;
+    email: string | null;
+    sent_at: string | null;
+    accepted_at: string | null;
+    expires_at: string | null;
+    revoked_at: string | null;
+    last_error: string | null;
+  } | null;
+  admin_role?: {
+    admin_id: string;
+    role: string;
+    is_active: boolean;
+    permissions: string[];
+    scope_types: string[];
+  } | null;
+  detail_sections?: Array<{
+    key: string;
+    title: string;
+    status: "available" | "unavailable";
+    fields: Array<{
+      label: string;
+      value: string;
+    }>;
+    message: string | null;
+  }>;
 };
 
 export type Group = {

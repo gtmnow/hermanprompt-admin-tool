@@ -24,6 +24,7 @@ import { ReportsPage } from "../../pages/reports/ReportsPage";
 import { ResellersPage } from "../../pages/resellers/ResellersPage";
 import { ServiceTiersPage } from "../../pages/settings/ServiceTiersPage";
 import { SettingsPage } from "../../pages/settings/SettingsPage";
+import { UserImportPage } from "../../pages/users/UserImportPage";
 import { UsersPage } from "../../pages/users/UsersPage";
 
 function AuthLoadingScreen() {
@@ -91,6 +92,7 @@ export function AppRouter() {
             <Route path="onboarding" element={<OrganizationOnboardingTab />} />
           </Route>
           <Route path="/users" element={<UsersPage />} />
+          <Route path="/users/import" element={<UserImportPage />} />
           <Route path="/groups" element={<GroupsPage />} />
           <Route path="/admins" element={<AdminsPage />} />
           <Route path="/reports" element={<ReportsPage />} />

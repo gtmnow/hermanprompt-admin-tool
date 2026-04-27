@@ -288,6 +288,80 @@ def table_exists(db: Session, table_name: str) -> bool:
         return False
 
 
+def format_user_detail_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if value is None:
+        return "Unavailable"
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
+
+
+def get_user_detail_sections(db: Session, user_id_hash: str) -> list[dict[str, object]]:
+    section_configs = [
+        ("type_detail", "foundational_profile", "Foundational Profile"),
+        ("final_profile", "effective_profile", "Effective Profile"),
+        ("brain_chemistry", "brain_chemistry", "Brain Chemistry"),
+        ("environment_details", "environment_details", "Environment Details"),
+        ("behaviorial_adj", "behavioral_adjustments", "Behavioral Adjustments"),
+        ("user_feedback_adjustments", "user_feedback_adjustments", "User Feedback Adjustments"),
+    ]
+    sections: list[dict[str, object]] = []
+    ignored_columns = {"id", "user_id_hash", "created_at", "updated_at"}
+
+    for table_name, key, title in section_configs:
+        if not table_exists(db, table_name):
+            sections.append(
+                {
+                    "key": key,
+                    "title": title,
+                    "status": "unavailable",
+                    "fields": [],
+                    "message": "Not available in the current data source.",
+                }
+            )
+            continue
+
+        row = db.execute(
+            text(f"select * from {table_name} where user_id_hash = :user_id_hash limit 1"),
+            {"user_id_hash": user_id_hash},
+        ).mappings().first()
+
+        if row is None:
+            sections.append(
+                {
+                    "key": key,
+                    "title": title,
+                    "status": "unavailable",
+                    "fields": [],
+                    "message": "No data is currently stored for this user.",
+                }
+            )
+            continue
+
+        fields = [
+            {
+                "label": column.replace("_", " ").title(),
+                "value": format_user_detail_value(value),
+            }
+            for column, value in row.items()
+            if column not in ignored_columns and value is not None
+        ]
+
+        sections.append(
+            {
+                "key": key,
+                "title": title,
+                "status": "available" if fields else "unavailable",
+                "fields": fields,
+                "message": None if fields else "No populated fields are currently available.",
+            }
+        )
+
+    return sections
+
+
 def column_exists(db: Session, table_name: str, column_name: str) -> bool:
     return bool(
         db.execute(

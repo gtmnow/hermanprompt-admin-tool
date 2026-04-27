@@ -8,10 +8,11 @@ import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
 import { formatDateTime } from "../../lib/format";
 import type { Group, UserMembership } from "../../lib/types";
-import { parseImportedUsers } from "../../lib/userImport";
 
 type UserActionKind = "deactivate" | "reinvite" | "delete";
+type UserSortKey = "last_activity" | "name" | "organization" | "status";
 type UserLimitDialogState = {
+  mode: "create";
   requestedUsers: number;
   currentUsers: number;
   limit: number;
@@ -26,7 +27,28 @@ type UserEditForm = {
   status: UserMembership["status"];
   is_primary: boolean;
   group_ids: string[];
+  admin_role: string;
 };
+
+type CreateUserForm = {
+  tenant_id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  title: string;
+  status: UserMembership["status"];
+  initial_user_type: number;
+  group_id: string;
+};
+
+const adminRoleOptions = [
+  "super_admin",
+  "support_admin",
+  "reseller_super_user",
+  "tenant_admin",
+  "group_admin",
+  "analyst",
+] as const;
 
 const defaultUserEditForm: UserEditForm = {
   first_name: "",
@@ -36,6 +58,18 @@ const defaultUserEditForm: UserEditForm = {
   status: "invited",
   is_primary: true,
   group_ids: [],
+  admin_role: "",
+};
+
+const defaultCreateUserForm: CreateUserForm = {
+  tenant_id: "",
+  first_name: "",
+  last_name: "",
+  email: "",
+  title: "",
+  status: "invited",
+  initial_user_type: 1,
+  group_id: "",
 };
 
 function actionLabel(action: UserActionKind): string {
@@ -94,18 +128,77 @@ function buildUserEditForm(user: UserMembership): UserEditForm {
     status: user.status,
     is_primary: user.is_primary,
     group_ids: user.group_memberships.map((membership) => membership.group_id),
+    admin_role: user.admin_role?.role ?? "",
   };
+}
+
+function displayUserName(user: UserMembership) {
+  if (user.profile?.first_name || user.profile?.last_name) {
+    return `${user.profile?.first_name ?? ""} ${user.profile?.last_name ?? ""}`.trim();
+  }
+  return user.profile?.email ?? user.user_id_hash;
+}
+
+function statusBadgeValue(user: UserMembership) {
+  return user.status_summary?.badge ?? user.status;
+}
+
+function matchesSearch(user: UserMembership, search: string, groupNameById: Map<string, string>) {
+  const normalizedSearch = search.trim().toLowerCase();
+  if (!normalizedSearch) {
+    return true;
+  }
+  const haystack = [
+    user.user_id_hash,
+    user.profile?.first_name,
+    user.profile?.last_name,
+    user.profile?.email,
+    user.profile?.title,
+    user.admin_role?.role,
+    user.status_summary?.badge,
+    ...user.group_memberships.map((membership) => groupNameById.get(membership.group_id) ?? membership.group_id),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(normalizedSearch);
+}
+
+function sortUsers(
+  users: UserMembership[],
+  sortKey: UserSortKey,
+  tenantNameById: Map<string, string>,
+) {
+  return [...users].sort((left, right) => {
+    if (sortKey === "name") {
+      return displayUserName(left).localeCompare(displayUserName(right));
+    }
+    if (sortKey === "organization") {
+      return (tenantNameById.get(left.tenant_id) ?? left.tenant_id).localeCompare(
+        tenantNameById.get(right.tenant_id) ?? right.tenant_id,
+      );
+    }
+    if (sortKey === "status") {
+      return statusBadgeValue(left).localeCompare(statusBadgeValue(right));
+    }
+    const leftValue = left.profile?.last_activity_at ?? left.updated_at;
+    const rightValue = right.profile?.last_activity_at ?? right.updated_at;
+    return new Date(rightValue).getTime() - new Date(leftValue).getTime();
+  });
 }
 
 export function UsersPage() {
   const [search, setSearch] = useState("");
   const [tenantId, setTenantId] = useState("all");
-  const [importTenantId, setImportTenantId] = useState("");
-  const [importText, setImportText] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortKey, setSortKey] = useState<UserSortKey>("last_activity");
   const [selectedUser, setSelectedUser] = useState<UserMembership | null>(null);
   const [userEditForm, setUserEditForm] = useState<UserEditForm>(defaultUserEditForm);
   const [pendingAction, setPendingAction] = useState<UserActionKind | null>(null);
   const [completedAction, setCompletedAction] = useState<UserActionKind | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createUserForm, setCreateUserForm] = useState<CreateUserForm>(defaultCreateUserForm);
   const [userLimitDialog, setUserLimitDialog] = useState<UserLimitDialogState | null>(null);
   const queryClient = useQueryClient();
 
@@ -114,12 +207,17 @@ export function UsersPage() {
     queryFn: () => tenantApi.listTenants(),
   });
   const usersQuery = useQuery({
-    queryKey: ["users-page-users"],
-    queryFn: () => tenantApi.getUsers(),
+    queryKey: ["users-page-users", tenantId, groupId],
+    queryFn: () => tenantApi.getUsers(tenantId === "all" ? undefined : tenantId, groupId || undefined),
   });
   const groupsQuery = useQuery({
     queryKey: ["users-page-groups"],
     queryFn: () => tenantApi.getGroups(),
+  });
+  const createTenantUsersQuery = useQuery({
+    queryKey: ["users-page-create-tenant-users", createUserForm.tenant_id],
+    queryFn: () => tenantApi.getUsers(createUserForm.tenant_id),
+    enabled: createDialogOpen && Boolean(createUserForm.tenant_id),
   });
 
   const tenantNameById = useMemo(
@@ -127,41 +225,44 @@ export function UsersPage() {
       new Map((tenantsQuery.data?.items ?? []).map((item) => [item.tenant.id, item.tenant.tenant_name])),
     [tenantsQuery.data],
   );
+  const groupNameById = useMemo(
+    () => new Map((groupsQuery.data?.items ?? []).map((group) => [group.id, group.group_name])),
+    [groupsQuery.data],
+  );
+
+  const visibleGroups = useMemo(() => {
+    const groups = groupsQuery.data?.items ?? [];
+    return groups.filter((group) => (tenantId === "all" ? true : group.tenant_id === tenantId));
+  }, [groupsQuery.data, tenantId]);
+  const selectedUserGroups = useMemo(
+    () => (groupsQuery.data?.items ?? []).filter((group) => group.tenant_id === selectedUser?.tenant_id),
+    [groupsQuery.data, selectedUser],
+  );
+  const createAvailableGroups = useMemo(
+    () => (groupsQuery.data?.items ?? []).filter((group) => group.tenant_id === createUserForm.tenant_id),
+    [groupsQuery.data, createUserForm.tenant_id],
+  );
 
   const filteredUsers = useMemo(() => {
     const users = usersQuery.data?.items ?? [];
-    return users.filter((user) => {
-      const matchesTenant = tenantId === "all" ? true : user.tenant_id === tenantId;
-      const haystack = [
-        user.user_id_hash,
-        user.profile?.first_name,
-        user.profile?.last_name,
-        user.profile?.email,
-        user.profile?.title,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      const matchesSearch = haystack.includes(search.toLowerCase());
-      return matchesTenant && matchesSearch;
+    const statusScoped = users.filter((user) => {
+      const matchesStatus = statusFilter === "all" ? true : statusBadgeValue(user) === statusFilter;
+      return matchesStatus && matchesSearch(user, search, groupNameById);
     });
-  }, [search, tenantId, usersQuery.data]);
-
-  const selectedUserGroups = useMemo(
-    () =>
-      (groupsQuery.data?.items ?? []).filter((group) => group.tenant_id === selectedUser?.tenant_id),
-    [groupsQuery.data, selectedUser],
-  );
+    return sortUsers(statusScoped, sortKey, tenantNameById);
+  }, [groupNameById, search, sortKey, statusFilter, tenantNameById, usersQuery.data]);
 
   const invalidateUserQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["users-page-users"] }),
-      queryClient.invalidateQueries({ queryKey: ["users-page-tenants"] }),
       queryClient.invalidateQueries({ queryKey: ["users-page-groups"] }),
+      queryClient.invalidateQueries({ queryKey: ["users-page-create-tenant-users"] }),
       queryClient.invalidateQueries({ queryKey: ["tenant-users"] }),
       queryClient.invalidateQueries({ queryKey: ["tenant-groups"] }),
       queryClient.invalidateQueries({ queryKey: ["tenant"] }),
       queryClient.invalidateQueries({ queryKey: ["tenants"] }),
+      queryClient.invalidateQueries({ queryKey: ["admins-page-admins"] }),
+      queryClient.invalidateQueries({ queryKey: ["admins"] }),
     ]);
   };
 
@@ -170,8 +271,9 @@ export function UsersPage() {
     setUserEditForm(buildUserEditForm(user));
     setPendingAction(null);
     setCompletedAction(null);
-    userActionMutation.reset();
     updateUserMutation.reset();
+    updateAdminRoleMutation.reset();
+    userActionMutation.reset();
   };
 
   const closeUserDialog = () => {
@@ -179,16 +281,39 @@ export function UsersPage() {
     setUserEditForm(defaultUserEditForm);
     setPendingAction(null);
     setCompletedAction(null);
-    userActionMutation.reset();
     updateUserMutation.reset();
+    updateAdminRoleMutation.reset();
+    userActionMutation.reset();
   };
 
-  const toggleGroupSelection = (groupId: string) => {
+  const resetCreateForm = (preferredTenantId = "") => {
+    setCreateUserForm({
+      ...defaultCreateUserForm,
+      tenant_id: preferredTenantId,
+    });
+    createUserMutation.reset();
+  };
+
+  const openCreateDialog = () => {
+    const defaultTenantId =
+      tenantId !== "all"
+        ? tenantId
+        : tenantsQuery.data?.items?.[0]?.tenant.id ?? "";
+    resetCreateForm(defaultTenantId);
+    setCreateDialogOpen(true);
+  };
+
+  const closeCreateDialog = () => {
+    setCreateDialogOpen(false);
+    resetCreateForm("");
+  };
+
+  const toggleGroupSelection = (selectedGroupId: string) => {
     setUserEditForm((current) => ({
       ...current,
-      group_ids: current.group_ids.includes(groupId)
-        ? current.group_ids.filter((value) => value !== groupId)
-        : [...current.group_ids, groupId],
+      group_ids: current.group_ids.includes(selectedGroupId)
+        ? current.group_ids.filter((value) => value !== selectedGroupId)
+        : [...current.group_ids, selectedGroupId],
     }));
   };
 
@@ -214,6 +339,43 @@ export function UsersPage() {
     },
   });
 
+  const updateAdminRoleMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedUser?.admin_role?.admin_id) {
+        throw new Error("This user does not currently have an admin role assignment.");
+      }
+      if (!userEditForm.admin_role) {
+        throw new Error("Select an admin role before saving.");
+      }
+      return tenantApi.updateAdmin(selectedUser.admin_role.admin_id, {
+        role: userEditForm.admin_role,
+      });
+    },
+    onSuccess: async ({ resource }) => {
+      await invalidateUserQueries();
+      setSelectedUser((current) =>
+        current
+          ? {
+              ...current,
+              admin_role: {
+                ...(current.admin_role ?? {
+                  admin_id: resource.id,
+                  is_active: resource.is_active,
+                  permissions: [],
+                  scope_types: [],
+                }),
+                admin_id: resource.id,
+                role: resource.role,
+                is_active: resource.is_active,
+                permissions: resource.permissions.map((permission) => permission.permission_key),
+                scope_types: resource.scopes.map((scope) => scope.scope_type),
+              },
+            }
+          : current,
+      );
+    },
+  });
+
   const userActionMutation = useMutation({
     mutationFn: (action: UserActionKind) => {
       if (!selectedUser) {
@@ -231,84 +393,70 @@ export function UsersPage() {
     },
   });
 
-  useEffect(() => {
-    if (!importTenantId && tenantsQuery.data?.items?.[0]?.tenant.id) {
-      setImportTenantId(tenantsQuery.data.items[0].tenant.id);
-    }
-  }, [importTenantId, tenantsQuery.data]);
-
-  useEffect(() => {
-    if (tenantId !== "all") {
-      setImportTenantId(tenantId);
-    }
-  }, [tenantId]);
-
-  const parsedImportRows = useMemo(() => parseImportedUsers(importText), [importText]);
-
-  const importUsersMutation = useMutation({
-    mutationFn: async () => {
-      if (!importTenantId) {
-        throw new Error("Select an organization for the import.");
+  const createUserMutation = useMutation({
+    mutationFn: () => {
+      if (!createUserForm.tenant_id) {
+        throw new Error("Select an organization before creating a user.");
       }
-      if (parsedImportRows.length === 0) {
-        throw new Error("Paste at least one valid user row to import.");
+      if (!createUserForm.email.trim()) {
+        throw new Error("Email is required.");
       }
-
-      const groups = await tenantApi.getGroups(importTenantId);
-      const groupIdByName = new Map(
-        groups.items.map((group) => [group.group_name.trim().toLowerCase(), group.id]),
-      );
-
-      for (const row of parsedImportRows) {
-        const groupId = row.group_name ? groupIdByName.get(row.group_name.trim().toLowerCase()) : undefined;
-        await tenantApi.createUser({
-          ...(row.user_id_hash ? { user_id_hash: row.user_id_hash } : {}),
-          tenant_id: importTenantId,
-          group_ids: groupId ? [groupId] : [],
-          status: row.status,
-          is_primary: true,
-          first_name: row.first_name || null,
-          last_name: row.last_name || null,
-          email: row.email || null,
-          title: row.title || null,
-          initial_user_type: row.initial_user_type,
-        });
-      }
+      return tenantApi.createUser({
+        tenant_id: createUserForm.tenant_id,
+        group_ids: createUserForm.group_id ? [createUserForm.group_id] : [],
+        status: createUserForm.status,
+        is_primary: true,
+        first_name: createUserForm.first_name || null,
+        last_name: createUserForm.last_name || null,
+        email: createUserForm.email || null,
+        title: createUserForm.title || null,
+        initial_user_type: createUserForm.initial_user_type,
+      });
     },
-    onSuccess: async () => {
-      setImportText("");
-      await Promise.all([
-        invalidateUserQueries(),
-        queryClient.invalidateQueries({ queryKey: ["tenant-onboarding"] }),
-        queryClient.invalidateQueries({ queryKey: ["activation-users"] }),
-        queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail"] }),
-      ]);
+    onSuccess: async ({ resource }) => {
+      await invalidateUserQueries();
+      setCreateDialogOpen(false);
+      setSelectedUser(resource);
+      setUserEditForm(buildUserEditForm(resource));
     },
   });
 
-  if (tenantsQuery.isLoading || usersQuery.isLoading || groupsQuery.isLoading) {
-    return <LoadingBlock label="Loading users..." />;
-  }
-
-  const users = usersQuery.data?.items ?? [];
-  const activeUsers = users.filter((user) => user.status === "active").length;
+  const users = filteredUsers;
+  const activeUsers = users.filter((user) => statusBadgeValue(user) === "active").length;
   const withSessions = users.filter((user) => (user.profile?.sessions_count ?? 0) > 0).length;
-  const groupNameById = new Map((groupsQuery.data?.items ?? []).map((group) => [group.id, group.group_name]));
-  const selectedImportTenant = (tenantsQuery.data?.items ?? []).find((item) => item.tenant.id === importTenantId) ?? null;
-  const currentUsersForImportTenant = users.filter((user) => user.tenant_id === importTenantId && user.status !== "deleted").length;
+  const visibleOrganizations = new Set(users.map((user) => user.tenant_id)).size;
+  const selectedCreateTenant =
+    (tenantsQuery.data?.items ?? []).find((item) => item.tenant.id === createUserForm.tenant_id) ?? null;
+  const currentUsersForCreateTenant = (createTenantUsersQuery.data?.items ?? []).filter((user) => user.status !== "deleted").length;
 
-  function requestBulkImport() {
-    const limit = tierUserLimit(selectedImportTenant?.service_tier ?? null);
+  function requestCreateUser() {
+    const limit = tierUserLimit(selectedCreateTenant?.service_tier ?? null);
     if (!limit) {
-      importUsersMutation.mutate();
+      createUserMutation.mutate();
       return;
     }
     setUserLimitDialog({
-      requestedUsers: parsedImportRows.length,
-      currentUsers: currentUsersForImportTenant,
+      mode: "create",
+      requestedUsers: 1,
+      currentUsers: currentUsersForCreateTenant,
       limit,
-      blocked: currentUsersForImportTenant + parsedImportRows.length > limit,
+      blocked: currentUsersForCreateTenant + 1 > limit,
     });
+  }
+
+  useEffect(() => {
+    if (tenantId === "all") {
+      setGroupId("");
+      return;
+    }
+    const groupStillVisible = visibleGroups.some((group) => group.id === groupId);
+    if (!groupStillVisible) {
+      setGroupId("");
+    }
+  }, [groupId, tenantId, visibleGroups]);
+
+  if (tenantsQuery.isLoading || usersQuery.isLoading || groupsQuery.isLoading) {
+    return <LoadingBlock label="Loading users..." />;
   }
 
   return (
@@ -320,21 +468,33 @@ export function UsersPage() {
             Review the current Herman Prompt user inventory inside the admin tool, including auth-backed identity records, activity, organization context, and editable access assignments.
           </p>
         </div>
-        <Link className="secondary-button" to="/orgs">
-          View organizations
-        </Link>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button className="primary-button" onClick={openCreateDialog} type="button">
+            Create user
+          </button>
+          <Link
+            className="secondary-button"
+            state={{ tenantId: tenantId === "all" ? "" : tenantId }}
+            to="/users/import"
+          >
+            Bulk Import Users
+          </Link>
+          <Link className="secondary-button" to="/orgs">
+            View organizations
+          </Link>
+        </div>
       </div>
 
       <div className="kpi-grid users-page__kpis">
         <div className="card metric-card">
           <div className="metric-card__label">Users</div>
           <div className="metric-card__value">{users.length}</div>
-          <div className="metric-card__trend">Snapshot-backed total</div>
+          <div className="metric-card__trend">Within the current visible scope</div>
         </div>
         <div className="card metric-card">
           <div className="metric-card__label">Active Users</div>
           <div className="metric-card__value">{activeUsers}</div>
-          <div className="metric-card__trend">Currently active in the imported dataset</div>
+          <div className="metric-card__trend">Based on current Herman Admin status interpretation</div>
         </div>
         <div className="card metric-card">
           <div className="metric-card__label">With Sessions</div>
@@ -343,33 +503,39 @@ export function UsersPage() {
         </div>
         <div className="card metric-card">
           <div className="metric-card__label">Organizations</div>
-          <div className="metric-card__value">{new Set(users.map((user) => user.tenant_id)).size}</div>
-          <div className="metric-card__trend">Across current visible scope</div>
+          <div className="metric-card__value">{visibleOrganizations}</div>
+          <div className="metric-card__trend">Represented in the current results</div>
         </div>
       </div>
 
       <div className="panel users-page__panel">
         <div className="split-header users-page__filters">
           <div>
-            <h3 className="panel-title">Bulk Import Users</h3>
-            <div className="muted">Paste CSV or tab-separated rows with headers like `email,first_name,last_name,title,group_name,status,user_id_hash,initial_user_type`.</div>
+            <h3 className="panel-title">User Inventory</h3>
+            <div className="muted">Filter by organization, group, status, or identity fields. User details and lifecycle actions remain available from the status column.</div>
           </div>
         </div>
 
-        {importUsersMutation.error ? (
-          <div className="section-note section-note--danger">{mutationMessage(importUsersMutation.error)}</div>
-        ) : null}
-
-        <div className="field-row">
+        <div className="field-row field-row--three">
           <div>
-            <label className="field-label" htmlFor="users_import_tenant">Import Into Organization</label>
+            <label className="field-label" htmlFor="users_search">Search</label>
+            <input
+              className="field"
+              id="users_search"
+              placeholder="Name, email, group, admin role, or user hash"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+          <div>
+            <label className="field-label" htmlFor="users_tenant_filter">Organization</label>
             <select
               className="field"
-              id="users_import_tenant"
-              value={importTenantId}
-              onChange={(event) => setImportTenantId(event.target.value)}
+              id="users_tenant_filter"
+              value={tenantId}
+              onChange={(event) => setTenantId(event.target.value)}
             >
-              <option value="">Select organization</option>
+              <option value="all">All organizations</option>
               {(tenantsQuery.data?.items ?? []).map((item) => (
                 <option key={item.tenant.id} value={item.tenant.id}>
                   {item.tenant.tenant_name}
@@ -377,54 +543,55 @@ export function UsersPage() {
               ))}
             </select>
           </div>
+          <div>
+            <label className="field-label" htmlFor="users_group_filter">Group</label>
+            <select
+              className="field"
+              id="users_group_filter"
+              value={groupId}
+              onChange={(event) => setGroupId(event.target.value)}
+            >
+              <option value="">All groups</option>
+              {visibleGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.group_name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        <div>
-          <label className="field-label" htmlFor="users_import_text">User Rows</label>
-          <textarea
-            className="field"
-            id="users_import_text"
-            rows={7}
-            value={importText}
-            onChange={(event) => setImportText(event.target.value)}
-          />
-          <div className="field-tip">The preview below ignores blank lines and auto-generates a user hash when one is not supplied.</div>
-        </div>
-
-        <div className="section-note">
-          {parsedImportRows.length} row{parsedImportRows.length === 1 ? "" : "s"} ready to import.
-        </div>
-
-        <div>
-          <button
-            className="primary-button"
-            disabled={!importTenantId || parsedImportRows.length === 0 || importUsersMutation.isPending}
-            onClick={requestBulkImport}
-            type="button"
-          >
-            {importUsersMutation.isPending ? "Importing..." : "Import users"}
-          </button>
-        </div>
-
-        <div className="filter-bar users-page__filters">
-          <input
-            className="search-input users-page__search"
-            placeholder="Search by name, email, or user hash"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          <select
-            className="select-input users-page__select"
-            value={tenantId}
-            onChange={(event) => setTenantId(event.target.value)}
-          >
-            <option value="all">All organizations</option>
-            {(tenantsQuery.data?.items ?? []).map((item) => (
-              <option key={item.tenant.id} value={item.tenant.id}>
-                {item.tenant.tenant_name}
-              </option>
-            ))}
-          </select>
+        <div className="field-row field-row--three">
+          <div>
+            <label className="field-label" htmlFor="users_status_filter">Status</label>
+            <select
+              className="field"
+              id="users_status_filter"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
+              <option value="all">All statuses</option>
+              <option value="invited">Invited</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="suspended">Suspended</option>
+              <option value="deleted">Deleted</option>
+            </select>
+          </div>
+          <div>
+            <label className="field-label" htmlFor="users_sort_key">Sort By</label>
+            <select
+              className="field"
+              id="users_sort_key"
+              value={sortKey}
+              onChange={(event) => setSortKey(event.target.value as UserSortKey)}
+            >
+              <option value="last_activity">Last activity</option>
+              <option value="name">Name</option>
+              <option value="organization">Organization</option>
+              <option value="status">Status</option>
+            </select>
+          </div>
         </div>
 
         <div className="table-card users-page__table-card">
@@ -436,51 +603,229 @@ export function UsersPage() {
                   <th>Organization</th>
                   <th>Status</th>
                   <th>Groups</th>
-                  <th>Role</th>
+                  <th>Admin Role</th>
+                  <th>Title</th>
                   <th>Sessions</th>
                   <th>Improvement</th>
                   <th>Last Activity</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.map((user) => (
-                  <tr key={user.id}>
-                    <td className="users-page__user-cell">
-                      <strong>
-                        {user.profile?.first_name || user.profile?.last_name
-                          ? `${user.profile?.first_name ?? ""} ${user.profile?.last_name ?? ""}`.trim()
-                          : "Unnamed user"}
-                      </strong>
-                      <div className="muted">{user.profile?.email ?? "No email on file"}</div>
+                {users.length === 0 ? (
+                  <tr>
+                    <td colSpan={9}>
+                      <div className="empty-state table-empty-state">No users match the current filters.</div>
                     </td>
-                    <td className="users-page__org-cell">
-                      <Link className="users-page__org-link" to={`/orgs/${user.tenant_id}`}>
-                        {tenantNameById.get(user.tenant_id) ?? user.tenant_id}
-                      </Link>
-                    </td>
-                    <td>
-                      <button className="users-page__status-button" type="button" onClick={() => openUserDialog(user)}>
-                        <StatusBadge value={user.status} />
-                      </button>
-                    </td>
-                    <td>
-                      {user.group_memberships.length > 0
-                        ? user.group_memberships
-                            .map((membership) => groupNameById.get(membership.group_id) ?? "Unknown group")
-                            .join(", ")
-                        : "Unassigned"}
-                    </td>
-                    <td>{user.profile?.title ?? "Member"}</td>
-                    <td>{user.profile?.sessions_count ?? 0}</td>
-                    <td>{user.profile?.avg_improvement_pct != null ? `${user.profile.avg_improvement_pct}%` : "Pending"}</td>
-                    <td>{formatDateTime(user.profile?.last_activity_at ?? user.updated_at)}</td>
                   </tr>
-                ))}
+                ) : (
+                  users.map((user) => (
+                    <tr key={user.id}>
+                      <td className="users-page__user-cell">
+                        <strong>{displayUserName(user)}</strong>
+                        <div className="muted">{user.profile?.email ?? "No email on file"}</div>
+                        <div className="muted">Hash: {user.user_id_hash}</div>
+                      </td>
+                      <td className="users-page__org-cell">
+                        <Link className="users-page__org-link" to={`/orgs/${user.tenant_id}`}>
+                          {tenantNameById.get(user.tenant_id) ?? user.tenant_id}
+                        </Link>
+                      </td>
+                      <td>
+                        <button className="users-page__status-button" type="button" onClick={() => openUserDialog(user)}>
+                          <StatusBadge value={statusBadgeValue(user)} />
+                        </button>
+                        {user.status_summary?.detail ? (
+                          <div className="muted" style={{ marginTop: 8 }}>{user.status_summary.detail}</div>
+                        ) : null}
+                      </td>
+                      <td>
+                        {user.group_memberships.length > 0
+                          ? user.group_memberships
+                              .map((membership) => groupNameById.get(membership.group_id) ?? "Unknown group")
+                              .join(", ")
+                          : "Unassigned"}
+                      </td>
+                      <td>{user.admin_role?.role ?? "Not an admin"}</td>
+                      <td>{user.profile?.title ?? "Member"}</td>
+                      <td>{user.profile?.sessions_count ?? 0}</td>
+                      <td>{user.profile?.avg_improvement_pct != null ? `${user.profile.avg_improvement_pct}%` : "Pending"}</td>
+                      <td>{formatDateTime(user.profile?.last_activity_at ?? user.updated_at)}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
+
+      {createDialogOpen ? (
+        <div className="dialog-backdrop" role="presentation" onClick={closeCreateDialog}>
+          <div
+            className="dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-user-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="split-header">
+              <div>
+                <h3 className="panel-title" id="create-user-dialog-title">Create User</h3>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  Create a single organization membership using the existing Herman Admin onboarding flow.
+                </div>
+              </div>
+              <button className="ghost-button" type="button" onClick={closeCreateDialog}>
+                Close
+              </button>
+            </div>
+
+            {createUserMutation.error ? (
+              <div className="section-note section-note--danger" style={{ marginTop: 14 }}>
+                {mutationMessage(createUserMutation.error)}
+              </div>
+            ) : null}
+
+            <div className="stack" style={{ marginTop: 18 }}>
+              <div className="field-row field-row--three">
+                <div>
+                  <label className="field-label" htmlFor="create_user_tenant">Organization</label>
+                  <select
+                    className="field"
+                    id="create_user_tenant"
+                    value={createUserForm.tenant_id}
+                    onChange={(event) =>
+                      setCreateUserForm((current) => ({ ...current, tenant_id: event.target.value, group_id: "" }))
+                    }
+                  >
+                    <option value="">Select organization</option>
+                    {(tenantsQuery.data?.items ?? []).map((item) => (
+                      <option key={item.tenant.id} value={item.tenant.id}>
+                        {item.tenant.tenant_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="create_user_initial_type">Initial User Type</label>
+                  <select
+                    className="field"
+                    id="create_user_initial_type"
+                    value={String(createUserForm.initial_user_type)}
+                    onChange={(event) =>
+                      setCreateUserForm((current) => ({ ...current, initial_user_type: Number(event.target.value) }))
+                    }
+                  >
+                    {Array.from({ length: 9 }, (_, index) => index + 1).map((value) => (
+                      <option key={value} value={value}>
+                        Type {value}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="create_user_status">Initial Status</label>
+                  <select
+                    className="field"
+                    id="create_user_status"
+                    value={createUserForm.status}
+                    onChange={(event) =>
+                      setCreateUserForm((current) => ({
+                        ...current,
+                        status: event.target.value as UserMembership["status"],
+                      }))
+                    }
+                  >
+                    <option value="invited">Invited</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="field-row field-row--three">
+                <div>
+                  <label className="field-label" htmlFor="create_user_first_name">First Name</label>
+                  <input
+                    className="field"
+                    id="create_user_first_name"
+                    value={createUserForm.first_name}
+                    onChange={(event) =>
+                      setCreateUserForm((current) => ({ ...current, first_name: event.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="create_user_last_name">Last Name</label>
+                  <input
+                    className="field"
+                    id="create_user_last_name"
+                    value={createUserForm.last_name}
+                    onChange={(event) =>
+                      setCreateUserForm((current) => ({ ...current, last_name: event.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="create_user_email">Email</label>
+                  <input
+                    className="field"
+                    id="create_user_email"
+                    value={createUserForm.email}
+                    onChange={(event) =>
+                      setCreateUserForm((current) => ({ ...current, email: event.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="field-row field-row--three">
+                <div>
+                  <label className="field-label" htmlFor="create_user_title">Title</label>
+                  <input
+                    className="field"
+                    id="create_user_title"
+                    value={createUserForm.title}
+                    onChange={(event) =>
+                      setCreateUserForm((current) => ({ ...current, title: event.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="create_user_group">Initial Group</label>
+                  <select
+                    className="field"
+                    id="create_user_group"
+                    value={createUserForm.group_id}
+                    onChange={(event) =>
+                      setCreateUserForm((current) => ({ ...current, group_id: event.target.value }))
+                    }
+                  >
+                    <option value="">No group assignment</option>
+                    {createAvailableGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.group_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="dialog-actions">
+                <button
+                  className="primary-button"
+                  disabled={!createUserForm.tenant_id || !createUserForm.email.trim() || createUserMutation.isPending}
+                  onClick={requestCreateUser}
+                  type="button"
+                >
+                  {createUserMutation.isPending ? "Saving..." : "Create User"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {selectedUser ? (
         <div className="dialog-backdrop" role="presentation" onClick={closeUserDialog}>
@@ -497,6 +842,7 @@ export function UsersPage() {
                 <div className="muted" style={{ marginTop: 6 }}>
                   {selectedUser.profile?.email ?? "No email on file"}
                 </div>
+                <div className="muted">User hash: {selectedUser.user_id_hash}</div>
               </div>
               <button className="ghost-button" type="button" onClick={closeUserDialog}>
                 Close
@@ -508,7 +854,11 @@ export function UsersPage() {
                 {mutationMessage(updateUserMutation.error)}
               </div>
             ) : null}
-
+            {updateAdminRoleMutation.error ? (
+              <div className="section-note section-note--danger" style={{ marginTop: 14 }}>
+                {mutationMessage(updateAdminRoleMutation.error)}
+              </div>
+            ) : null}
             {userActionMutation.error ? (
               <div className="section-note section-note--danger" style={{ marginTop: 14 }}>
                 {mutationMessage(userActionMutation.error)}
@@ -562,6 +912,23 @@ export function UsersPage() {
               </>
             ) : (
               <div className="stack" style={{ marginTop: 18 }}>
+                <div className="section-note">
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <StatusBadge value={statusBadgeValue(selectedUser)} />
+                    <span>{selectedUser.status_summary?.detail ?? "Current user membership status."}</span>
+                  </div>
+                </div>
+
+                {selectedUser.invitation_summary ? (
+                  <div className="section-note">
+                    Invitation state: <strong>{selectedUser.invitation_summary.state}</strong>
+                    {selectedUser.invitation_summary.email ? ` for ${selectedUser.invitation_summary.email}` : ""}
+                    {selectedUser.invitation_summary.sent_at ? ` / sent ${formatDateTime(selectedUser.invitation_summary.sent_at)}` : ""}
+                    {selectedUser.invitation_summary.accepted_at ? ` / accepted ${formatDateTime(selectedUser.invitation_summary.accepted_at)}` : ""}
+                    {selectedUser.invitation_summary.last_error ? ` / ${selectedUser.invitation_summary.last_error}` : ""}
+                  </div>
+                ) : null}
+
                 <div className="field-row field-row--three">
                   <div>
                     <label className="field-label" htmlFor="manage_user_first_name">First Name</label>
@@ -642,6 +1009,45 @@ export function UsersPage() {
                 </div>
 
                 <div>
+                  <label className="field-label" htmlFor="manage_user_admin_role">Admin Role</label>
+                  {selectedUser.admin_role ? (
+                    <div className="stack" style={{ gap: 10 }}>
+                      <select
+                        className="field"
+                        id="manage_user_admin_role"
+                        value={userEditForm.admin_role}
+                        onChange={(event) =>
+                          setUserEditForm((current) => ({ ...current, admin_role: event.target.value }))
+                        }
+                      >
+                        {adminRoleOptions.map((role) => (
+                          <option key={role} value={role}>
+                            {role}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="muted">
+                        Current permissions: {selectedUser.admin_role.permissions.join(", ") || "Inherited defaults only"}
+                      </div>
+                      <div className="dialog-actions">
+                        <button
+                          className="secondary-button"
+                          disabled={updateAdminRoleMutation.isPending || !userEditForm.admin_role}
+                          onClick={() => updateAdminRoleMutation.mutate()}
+                          type="button"
+                        >
+                          {updateAdminRoleMutation.isPending ? "Saving..." : "Save Admin Role"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="section-note">
+                      This user does not currently have a Herman Admin authorization role assignment.
+                    </div>
+                  )}
+                </div>
+
+                <div>
                   <div className="field-label">Groups</div>
                   {selectedUserGroups.length === 0 ? (
                     <div className="section-note">This organization has no groups yet, so there is nothing to assign.</div>
@@ -677,8 +1083,35 @@ export function UsersPage() {
                   </button>
                 </div>
 
+                <div className="panel panel--inset">
+                  <h3 className="panel-title">Read-Only Detail Sections</h3>
+                  <div className="stack" style={{ marginTop: 14 }}>
+                    {(selectedUser.detail_sections ?? []).map((section) => (
+                      <div className="section-note" key={section.key}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                          <strong>{section.title}</strong>
+                          <StatusBadge value={section.status} />
+                        </div>
+                        {section.fields.length > 0 ? (
+                          <div className="stack" style={{ gap: 6, marginTop: 10 }}>
+                            {section.fields.map((field) => (
+                              <div key={`${section.key}-${field.label}`}>
+                                <strong>{field.label}:</strong> {field.value}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="muted" style={{ marginTop: 10 }}>
+                            {section.message ?? "No detail is currently available for this section."}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="section-note">
-                  Status changes and group assignments support the day-to-day tenant admin workflow. Lifecycle actions below remain available for deactivation, reinvite, and full delete handling.
+                  Lifecycle actions below continue to use the current Herman Admin user-management semantics without changing any shared platform contract.
                 </div>
 
                 <div className="dialog-actions">
@@ -738,14 +1171,14 @@ export function UsersPage() {
                   {userLimitDialog.blocked
                     ? userLimitDialog.currentUsers >= userLimitDialog.limit
                       ? "No more users allowed."
-                      : "This import would exceed the service tier limit."
-                    : `Add users ${userLimitDialog.currentUsers + 1} through ${userLimitDialog.currentUsers + userLimitDialog.requestedUsers} of total allowed ${userLimitDialog.limit}?`}
+                      : "This add would exceed the service tier limit."
+                    : `Add user number ${userLimitDialog.currentUsers + 1} of total allowed ${userLimitDialog.limit}?`}
                 </div>
               </div>
             </div>
 
             <div className={`section-note${userLimitDialog.blocked ? " section-note--danger" : ""}`} style={{ marginTop: 18 }}>
-              {(selectedImportTenant?.tenant.tenant_name ?? "This organization")} is currently using {userLimitDialog.currentUsers} of {userLimitDialog.limit} allowed users.
+              {(selectedCreateTenant?.tenant.tenant_name ?? "This organization")} is currently using {userLimitDialog.currentUsers} of {userLimitDialog.limit} allowed users.
             </div>
 
             <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
@@ -754,7 +1187,7 @@ export function UsersPage() {
                   className="primary-button"
                   onClick={() => {
                     setUserLimitDialog(null);
-                    importUsersMutation.mutate();
+                    createUserMutation.mutate();
                   }}
                   type="button"
                 >

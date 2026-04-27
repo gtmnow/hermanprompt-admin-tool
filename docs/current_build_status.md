@@ -1,6 +1,6 @@
 # Herman Admin Current Build Status
 
-Last updated: 2026-04-23
+Last updated: 2026-04-27
 
 ## Purpose
 
@@ -9,6 +9,61 @@ This document records the current implemented state of the Herman Admin build so
 ## Implemented use-case coverage
 
 The current build includes the working foundation for use cases `1.1` through `8.2` from [hermanscience_full_use_cases.md](/Users/michaelanderson/projects/Herman-Admin/docs/hermanscience_full_use_cases.md:1).
+
+## User Administration Build Backlog
+
+The current User administration refactor backlog is tracked in [herman_user_admin_use_cases_assessed.xlsx](/Users/michaelanderson/projects/Herman-Admin/herman_user_admin_use_cases_assessed.xlsx). That workbook now includes:
+
+- `Build Priority`
+- `Current Support Level`
+- `Refactoring Effort Required`
+
+The next implementation tranche is the `Build Priority = 1` subset below.
+
+### Priority 1 user administration use cases
+
+| Functionality Group | Use Case | Current Support | Refactoring Effort |
+| --- | --- | --- | --- |
+| Core User Management | View user inventory | Partial | Medium |
+| Core User Management | Search users | Partial | Medium |
+| Core User Management | View user status | Partial | High |
+| Core User Management | View user activity metrics | Full | Low |
+| Core User Management | Assign users to organization | Partial | Low |
+| Core User Management | Auto-generate `user_id_hash` | Full | Low |
+| Core User Management | Create single user | Partial | Medium |
+| Core User Management | Edit user profile | Partial | High |
+| Core User Management | Assign/change user role | Not | High |
+| Core User Management | Assign user to group | Full | Low |
+| Core User Management | View user details | Not | High |
+| Core User Management | Activate/deactivate user | Partial | Medium |
+| Core User Management | Delete user | Partial | High |
+| Identity & Access Control | Enforce unique identity | Partial | Medium |
+| Identity & Access Control | Role-based access enforcement | Full | Low |
+| Identity & Access Control | Org-level visibility restrictions | Full | Low |
+| User Lifecycle Management | Track invite acceptance | Partial | Medium |
+| User Lifecycle Management | Update Status | Partial | High |
+| Analytics & Reporting | Track usage per user | Full | Low |
+| Analytics & Reporting | Track improvement score | Full | Low |
+
+### Priority 1 implementation themes
+
+The priority 1 set clusters into a small number of concrete build tracks for the `/users` workspace:
+
+1. Align the User administration screen with the actual backend user model.
+2. Make organization-scoped inventory, search, and status views reliable.
+3. Close lifecycle gaps around invite state, activation/deactivation, and deletion semantics.
+4. Add the missing detail surface for user profile inspection and editing.
+5. Preserve the already-working user metrics, role enforcement, org visibility, and canonical `user_id_hash` foundation while refactoring.
+
+### Current priority 1 pain points already visible in the codebase
+
+- The `/users` page currently loads the global user list and filters in the browser instead of using the tenant-scoped API path consistently.
+- The screen shows membership status, but it does not yet expose invitation lifecycle state cleanly enough to serve as a trustworthy "current user status" view.
+- Bulk import is implemented inline on the base User administration screen, which is functional but does not match the intended workflow.
+- User detail coverage stops at membership/profile fields and does not yet surface the broader foundational and CQI/persona tables called for by the use cases.
+- Role editing is not implemented on the User administration screen even though role-based enforcement already exists in the admin authorization model.
+
+All lower-priority User administration use cases remain in the workbook and should continue to be treated as the backlog after the priority 1 tranche is complete.
 
 ### 1.1 - 1.4 Reseller foundation
 

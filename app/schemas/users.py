@@ -57,6 +57,42 @@ class UserMembershipProfileSummary(BaseModel):
     last_activity_at: datetime | None = None
 
 
+class UserStatusSummary(BaseModel):
+    badge: str
+    detail: str | None = None
+
+
+class UserInvitationSummary(BaseModel):
+    state: str
+    email: str | None = None
+    sent_at: datetime | None = None
+    accepted_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+    last_error: str | None = None
+
+
+class UserAdminRoleSummary(BaseModel):
+    admin_id: UUID
+    role: str
+    is_active: bool
+    permissions: list[str] = Field(default_factory=list)
+    scope_types: list[str] = Field(default_factory=list)
+
+
+class UserDetailFieldSummary(BaseModel):
+    label: str
+    value: str
+
+
+class UserDetailSectionSummary(BaseModel):
+    key: str
+    title: str
+    status: Literal["available", "unavailable"]
+    fields: list[UserDetailFieldSummary] = Field(default_factory=list)
+    message: str | None = None
+
+
 class UserMembershipSummary(BaseModel):
     id: UUID
     user_id_hash: str
@@ -67,3 +103,7 @@ class UserMembershipSummary(BaseModel):
     updated_at: datetime
     group_memberships: list[UserGroupMembershipSummary] = Field(default_factory=list)
     profile: UserMembershipProfileSummary | None = None
+    status_summary: UserStatusSummary | None = None
+    invitation_summary: UserInvitationSummary | None = None
+    admin_role: UserAdminRoleSummary | None = None
+    detail_sections: list[UserDetailSectionSummary] = Field(default_factory=list)

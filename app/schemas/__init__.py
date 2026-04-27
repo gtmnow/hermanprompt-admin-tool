@@ -58,10 +58,14 @@ from app.schemas.tenants import (
     TenantValidationResult,
 )
 from app.schemas.users import (
+    UserAdminRoleSummary,
+    UserDetailSectionSummary,
+    UserInvitationSummary,
     UserLifecycleActionRequest,
     UserMembershipCreate,
     UserMembershipProfileSummary,
     UserMembershipSummary,
+    UserStatusSummary,
     UserMembershipUpdate,
 )
 
@@ -121,8 +125,12 @@ __all__ = [
     "TenantUpdate",
     "TenantValidationResult",
     "UserLifecycleActionRequest",
+    "UserAdminRoleSummary",
+    "UserDetailSectionSummary",
+    "UserInvitationSummary",
     "UserMembershipCreate",
     "UserMembershipProfileSummary",
     "UserMembershipSummary",
+    "UserStatusSummary",
     "UserMembershipUpdate",
 ]
