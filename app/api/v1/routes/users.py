@@ -328,6 +328,54 @@ def safe_auth_row_to_summary(db: Session, row: dict[str, object], tenant_id: str
         )
 
 
+def safe_membership_to_summary(db: Session, membership: UserTenantMembership) -> UserMembershipSummary:
+    try:
+        return to_user_summary(db, membership)
+    except Exception:
+        fallback_created_at = membership.created_at or datetime.now(timezone.utc)
+        fallback_updated_at = membership.updated_at or fallback_created_at
+        fallback_email = membership.profile.email if membership.profile and membership.profile.email else None
+        fallback_first_name = membership.profile.first_name if membership.profile else None
+        fallback_last_name = membership.profile.last_name if membership.profile else None
+
+        return UserMembershipSummary(
+            id=membership.id,
+            user_id_hash=membership.user_id_hash,
+            tenant_id=membership.tenant_id,
+            status=membership.status,
+            is_primary=membership.is_primary,
+            created_at=fallback_created_at,
+            updated_at=fallback_updated_at,
+            group_memberships=[],
+            profile=UserMembershipProfileSummary(
+                first_name=fallback_first_name,
+                last_name=fallback_last_name,
+                email=fallback_email,
+                title=membership.profile.title if membership.profile and membership.profile.title else "Member",
+                initial_user_type=membership.profile.initial_user_type if membership.profile else None,
+                utilization_level=membership.profile.utilization_level if membership.profile else None,
+                sessions_count=membership.profile.sessions_count if membership.profile else 0,
+                avg_improvement_pct=membership.profile.avg_improvement_pct if membership.profile else None,
+                last_activity_at=membership.profile.last_activity_at if membership.profile else None,
+            ),
+            status_summary=UserStatusSummary(
+                badge=membership.status,
+                detail="This user membership has incomplete related data, so Herman Admin is showing a safe fallback view.",
+            ),
+            invitation_summary=None,
+            admin_role=None,
+            detail_sections=[
+                UserDetailSectionSummary(
+                    key="membership_fallback_detail_unavailable",
+                    title="Read-Only Detail Sections",
+                    status="unavailable",
+                    fields=[],
+                    message="Detailed profile sections could not be assembled safely for this membership.",
+                )
+            ],
+        )
+
+
 def sort_datetime_value(item: UserMembershipSummary):
     value = item.profile.last_activity_at if item.profile and item.profile.last_activity_at is not None else item.updated_at
     if getattr(value, "tzinfo", None) is None:
@@ -357,7 +405,7 @@ def list_users(
         if tenant_id and visible_tenant_id != tenant_id:
             continue
         ensure_scope_access(principal, tenant_id=visible_tenant_id, group_id=group_id)
-        item = auth_row_to_summary(db, row, visible_tenant_id)
+        item = safe_auth_row_to_summary(db, row, visible_tenant_id)
         if group_id and not any(str(group.group_id) == group_id for group in item.group_memberships):
             continue
         items.append(item)
@@ -381,7 +429,7 @@ def list_users(
         membership_key = (membership.user_id_hash, membership.tenant_id)
         if membership_key in seen_memberships:
             continue
-        items.append(to_user_summary(db, membership))
+        items.append(safe_membership_to_summary(db, membership))
         seen_memberships.add(membership_key)
 
     items.sort(key=sort_datetime_value, reverse=True)
@@ -507,7 +555,7 @@ def get_user_memberships(
     for row in auth_rows:
         visible_tenant_id = map_snapshot_tenant_to_visible_tenant_id(db, str(row["tenant_id"]))
         ensure_scope_access(principal, tenant_id=visible_tenant_id)
-        item = auth_row_to_summary(db, row, visible_tenant_id)
+        item = safe_auth_row_to_summary(db, row, visible_tenant_id)
         items.append(item)
         seen_memberships.add((item.user_id_hash, str(item.tenant_id)))
 
@@ -517,7 +565,7 @@ def get_user_memberships(
         membership_key = (membership.user_id_hash, membership.tenant_id)
         if membership_key in seen_memberships:
             continue
-        items.append(to_user_summary(db, membership))
+        items.append(safe_membership_to_summary(db, membership))
     items.sort(key=sort_datetime_value, reverse=True)
     return ListEnvelope[UserMembershipSummary](items=items, page=1, page_size=len(items) or 1, total_count=len(items), filters={"user_id_hash": user_id_hash})
 
