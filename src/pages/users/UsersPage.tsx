@@ -928,243 +928,268 @@ export function UsersPage() {
                 </div>
               </>
             ) : (
-              <div className="stack" style={{ marginTop: 18 }}>
-                <div className="section-note">
-                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                    <StatusBadge value={statusBadgeValue(dialogUser ?? selectedUser)} />
-                    <span>{dialogUser?.status_summary?.detail ?? "Current user membership status."}</span>
-                  </div>
-                </div>
-
-                {dialogUser?.invitation_summary ? (
+              <div className="users-page__dialog-body">
+                <div className="users-page__dialog-sidebar">
                   <div className="section-note">
-                    Invitation state: <strong>{dialogUser.invitation_summary.state}</strong>
-                    {dialogUser.invitation_summary.email ? ` for ${dialogUser.invitation_summary.email}` : ""}
-                    {dialogUser.invitation_summary.sent_at ? ` / sent ${formatDateTime(dialogUser.invitation_summary.sent_at)}` : ""}
-                    {dialogUser.invitation_summary.accepted_at ? ` / accepted ${formatDateTime(dialogUser.invitation_summary.accepted_at)}` : ""}
-                    {dialogUser.invitation_summary.last_error ? ` / ${dialogUser.invitation_summary.last_error}` : ""}
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <StatusBadge value={statusBadgeValue(dialogUser ?? selectedUser)} />
+                      <span>{dialogUser?.status_summary?.detail ?? "Current user membership status."}</span>
+                    </div>
                   </div>
-                ) : null}
 
-                <div className="field-row field-row--three">
-                  <div>
-                    <label className="field-label" htmlFor="manage_user_first_name">First Name</label>
-                    <input
-                      className="field"
-                      id="manage_user_first_name"
-                      value={userEditForm.first_name}
-                      onChange={(event) =>
-                        setUserEditForm((current) => ({ ...current, first_name: event.target.value }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="field-label" htmlFor="manage_user_last_name">Last Name</label>
-                    <input
-                      className="field"
-                      id="manage_user_last_name"
-                      value={userEditForm.last_name}
-                      onChange={(event) =>
-                        setUserEditForm((current) => ({ ...current, last_name: event.target.value }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="field-label" htmlFor="manage_user_email">Email</label>
-                    <input
-                      className="field"
-                      id="manage_user_email"
-                      value={userEditForm.email}
-                      onChange={(event) => setUserEditForm((current) => ({ ...current, email: event.target.value }))}
-                    />
-                  </div>
-                </div>
+                  {dialogUser?.invitation_summary ? (
+                    <div className="section-note">
+                      Invitation state: <strong>{dialogUser.invitation_summary.state}</strong>
+                      {dialogUser.invitation_summary.email ? ` for ${dialogUser.invitation_summary.email}` : ""}
+                      {dialogUser.invitation_summary.sent_at ? ` / sent ${formatDateTime(dialogUser.invitation_summary.sent_at)}` : ""}
+                      {dialogUser.invitation_summary.accepted_at ? ` / accepted ${formatDateTime(dialogUser.invitation_summary.accepted_at)}` : ""}
+                      {dialogUser.invitation_summary.last_error ? ` / ${dialogUser.invitation_summary.last_error}` : ""}
+                    </div>
+                  ) : null}
 
-                <div className="field-row field-row--three">
-                  <div>
-                    <label className="field-label" htmlFor="manage_user_title">Title</label>
-                    <input
-                      className="field"
-                      id="manage_user_title"
-                      value={userEditForm.title}
-                      onChange={(event) => setUserEditForm((current) => ({ ...current, title: event.target.value }))}
-                    />
+                  <div className="panel panel--inset users-page__dialog-panel">
+                    <h3 className="panel-title">Admin Role</h3>
+                    <div className="users-page__dialog-panel-body">
+                      {dialogUser?.admin_role ? (
+                        <div className="stack" style={{ gap: 10 }}>
+                          <select
+                            className="field"
+                            id="manage_user_admin_role"
+                            value={userEditForm.admin_role}
+                            onChange={(event) =>
+                              setUserEditForm((current) => ({ ...current, admin_role: event.target.value }))
+                            }
+                          >
+                            {adminRoleOptions.map((role) => (
+                              <option key={role} value={role}>
+                                {role}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="muted">
+                            Current permissions: {dialogUser.admin_role.permissions.join(", ") || "Inherited defaults only"}
+                          </div>
+                          <div className="dialog-actions">
+                            <button
+                              className="secondary-button"
+                              disabled={updateAdminRoleMutation.isPending || !userEditForm.admin_role}
+                              onClick={() => updateAdminRoleMutation.mutate()}
+                              type="button"
+                            >
+                              {updateAdminRoleMutation.isPending ? "Saving..." : "Save Admin Role"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="section-note">
+                          This user does not currently have a Herman Admin authorization role assignment.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <label className="field-label" htmlFor="manage_user_status">Status</label>
-                    <select
-                      className="field"
-                      id="manage_user_status"
-                      value={userEditForm.status}
-                      onChange={(event) =>
-                        setUserEditForm((current) => ({
-                          ...current,
-                          status: event.target.value as UserMembership["status"],
-                        }))
-                      }
-                    >
-                      <option value="invited">Invited</option>
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="suspended">Suspended</option>
-                    </select>
-                  </div>
-                  <div style={{ alignSelf: "end" }}>
-                    <label className="field-label" htmlFor="manage_user_primary">Primary Membership</label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 44 }}>
-                      <input
-                        id="manage_user_primary"
-                        checked={userEditForm.is_primary}
-                        onChange={(event) =>
-                          setUserEditForm((current) => ({ ...current, is_primary: event.target.checked }))
-                        }
-                        type="checkbox"
-                      />
-                      <span>Flag as the primary organization membership</span>
-                    </label>
-                  </div>
-                </div>
 
-                <div>
-                  <label className="field-label" htmlFor="manage_user_admin_role">Admin Role</label>
-                  {dialogUser?.admin_role ? (
-                    <div className="stack" style={{ gap: 10 }}>
-                      <select
-                        className="field"
-                        id="manage_user_admin_role"
-                        value={userEditForm.admin_role}
-                        onChange={(event) =>
-                          setUserEditForm((current) => ({ ...current, admin_role: event.target.value }))
-                        }
-                      >
-                        {adminRoleOptions.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="muted">
-                        Current permissions: {dialogUser.admin_role.permissions.join(", ") || "Inherited defaults only"}
+                  <div className="panel panel--inset users-page__dialog-panel">
+                    <h3 className="panel-title">Groups</h3>
+                    <div className="users-page__dialog-panel-body">
+                      {selectedUserGroups.length === 0 ? (
+                        <div className="section-note">This organization has no groups yet, so there is nothing to assign.</div>
+                      ) : (
+                        <div className="stack users-page__group-list">
+                          {selectedUserGroups.map((group: Group) => (
+                            <label key={group.id} className="users-page__group-option">
+                              <input
+                                checked={userEditForm.group_ids.includes(group.id)}
+                                onChange={() => toggleGroupSelection(group.id)}
+                                type="checkbox"
+                              />
+                              <span>
+                                <strong>{group.group_name}</strong>
+                                <span className="muted" style={{ marginLeft: 8 }}>
+                                  {group.profile?.business_unit ?? "Group"}
+                                </span>
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="panel panel--inset users-page__dialog-panel">
+                    <h3 className="panel-title">Lifecycle Actions</h3>
+                    <div className="users-page__dialog-panel-body">
+                      <div className="section-note">
+                        Lifecycle actions below continue to use the current Herman Admin user-management semantics without changing any shared platform contract.
                       </div>
                       <div className="dialog-actions">
                         <button
                           className="secondary-button"
-                          disabled={updateAdminRoleMutation.isPending || !userEditForm.admin_role}
-                          onClick={() => updateAdminRoleMutation.mutate()}
+                          disabled={userActionMutation.isPending || updateUserMutation.isPending}
+                          onClick={() => {
+                            setPendingAction("deactivate");
+                            userActionMutation.reset();
+                          }}
                           type="button"
                         >
-                          {updateAdminRoleMutation.isPending ? "Saving..." : "Save Admin Role"}
+                          Deactivate User
+                        </button>
+                        <button
+                          className="primary-button"
+                          disabled={userActionMutation.isPending || updateUserMutation.isPending}
+                          onClick={() => {
+                            setPendingAction("reinvite");
+                            userActionMutation.reset();
+                          }}
+                          type="button"
+                        >
+                          Re-Invite User
+                        </button>
+                        <button
+                          className="ghost-button users-page__danger-button"
+                          disabled={userActionMutation.isPending || updateUserMutation.isPending}
+                          onClick={() => {
+                            setPendingAction("delete");
+                            userActionMutation.reset();
+                          }}
+                          type="button"
+                        >
+                          Fully Delete
                         </button>
                       </div>
                     </div>
-                  ) : (
-                    <div className="section-note">
-                      This user does not currently have a Herman Admin authorization role assignment.
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="field-label">Groups</div>
-                  {selectedUserGroups.length === 0 ? (
-                    <div className="section-note">This organization has no groups yet, so there is nothing to assign.</div>
-                  ) : (
-                    <div className="stack" style={{ gap: 10 }}>
-                      {selectedUserGroups.map((group: Group) => (
-                        <label key={group.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <input
-                            checked={userEditForm.group_ids.includes(group.id)}
-                            onChange={() => toggleGroupSelection(group.id)}
-                            type="checkbox"
-                          />
-                          <span>
-                            <strong>{group.group_name}</strong>
-                            <span className="muted" style={{ marginLeft: 8 }}>
-                              {group.profile?.business_unit ?? "Group"}
-                            </span>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="dialog-actions">
-                  <button
-                    className="primary-button"
-                    disabled={updateUserMutation.isPending}
-                    onClick={() => updateUserMutation.mutate()}
-                    type="button"
-                  >
-                    {updateUserMutation.isPending ? "Saving..." : "Save User Updates"}
-                  </button>
-                </div>
-
-                <div className="panel panel--inset">
-                  <h3 className="panel-title">Read-Only Detail Sections</h3>
-                  <div className="stack" style={{ marginTop: 14 }}>
-                    {(dialogUser?.detail_sections ?? []).map((section) => (
-                      <div className="section-note" key={section.key}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                          <strong>{section.title}</strong>
-                          <StatusBadge value={section.status} />
-                        </div>
-                        {section.fields.length > 0 ? (
-                          <div className="stack" style={{ gap: 6, marginTop: 10 }}>
-                            {section.fields.map((field) => (
-                              <div key={`${section.key}-${field.label}`}>
-                                <strong>{field.label}:</strong> {field.value}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="muted" style={{ marginTop: 10 }}>
-                            {section.message ?? "No detail is currently available for this section."}
-                          </div>
-                        )}
-                      </div>
-                    ))}
                   </div>
                 </div>
 
-                <div className="section-note">
-                  Lifecycle actions below continue to use the current Herman Admin user-management semantics without changing any shared platform contract.
-                </div>
+                <div className="users-page__dialog-main">
+                  <div className="panel panel--inset users-page__dialog-panel">
+                    <h3 className="panel-title">Profile & Membership</h3>
+                    <div className="users-page__dialog-panel-body">
+                      <div className="field-row field-row--three">
+                        <div>
+                          <label className="field-label" htmlFor="manage_user_first_name">First Name</label>
+                          <input
+                            className="field"
+                            id="manage_user_first_name"
+                            value={userEditForm.first_name}
+                            onChange={(event) =>
+                              setUserEditForm((current) => ({ ...current, first_name: event.target.value }))
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="field-label" htmlFor="manage_user_last_name">Last Name</label>
+                          <input
+                            className="field"
+                            id="manage_user_last_name"
+                            value={userEditForm.last_name}
+                            onChange={(event) =>
+                              setUserEditForm((current) => ({ ...current, last_name: event.target.value }))
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="field-label" htmlFor="manage_user_email">Email</label>
+                          <input
+                            className="field"
+                            id="manage_user_email"
+                            value={userEditForm.email}
+                            onChange={(event) => setUserEditForm((current) => ({ ...current, email: event.target.value }))}
+                          />
+                        </div>
+                      </div>
 
-                <div className="dialog-actions">
-                  <button
-                    className="secondary-button"
-                    disabled={userActionMutation.isPending || updateUserMutation.isPending}
-                    onClick={() => {
-                      setPendingAction("deactivate");
-                      userActionMutation.reset();
-                    }}
-                    type="button"
-                  >
-                    Deactivate User
-                  </button>
-                  <button
-                    className="primary-button"
-                    disabled={userActionMutation.isPending || updateUserMutation.isPending}
-                    onClick={() => {
-                      setPendingAction("reinvite");
-                      userActionMutation.reset();
-                    }}
-                    type="button"
-                  >
-                    Re-Invite User
-                  </button>
-                  <button
-                    className="ghost-button users-page__danger-button"
-                    disabled={userActionMutation.isPending || updateUserMutation.isPending}
-                    onClick={() => {
-                      setPendingAction("delete");
-                      userActionMutation.reset();
-                    }}
-                    type="button"
-                  >
-                    Fully Delete
-                  </button>
+                      <div className="field-row field-row--three">
+                        <div>
+                          <label className="field-label" htmlFor="manage_user_title">Title</label>
+                          <input
+                            className="field"
+                            id="manage_user_title"
+                            value={userEditForm.title}
+                            onChange={(event) => setUserEditForm((current) => ({ ...current, title: event.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="field-label" htmlFor="manage_user_status">Status</label>
+                          <select
+                            className="field"
+                            id="manage_user_status"
+                            value={userEditForm.status}
+                            onChange={(event) =>
+                              setUserEditForm((current) => ({
+                                ...current,
+                                status: event.target.value as UserMembership["status"],
+                              }))
+                            }
+                          >
+                            <option value="invited">Invited</option>
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                            <option value="suspended">Suspended</option>
+                          </select>
+                        </div>
+                        <div className="users-page__primary-toggle">
+                          <label className="field-label" htmlFor="manage_user_primary">Primary Membership</label>
+                          <label className="users-page__primary-toggle-label">
+                            <input
+                              id="manage_user_primary"
+                              checked={userEditForm.is_primary}
+                              onChange={(event) =>
+                                setUserEditForm((current) => ({ ...current, is_primary: event.target.checked }))
+                              }
+                              type="checkbox"
+                            />
+                            <span>Flag as the primary organization membership</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="dialog-actions users-page__dialog-save-row">
+                        <button
+                          className="primary-button"
+                          disabled={updateUserMutation.isPending}
+                          onClick={() => updateUserMutation.mutate()}
+                          type="button"
+                        >
+                          {updateUserMutation.isPending ? "Saving..." : "Save User Updates"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="panel panel--inset users-page__dialog-panel">
+                    <div className="split-header users-page__detail-header">
+                      <div>
+                        <h3 className="panel-title">Read-Only Detail Sections</h3>
+                        <div className="muted" style={{ marginTop: 6 }}>
+                          Foundational, effective, and supplemental profile data shown from the current Herman Admin data sources.
+                        </div>
+                      </div>
+                      {selectedUserDetailsQuery.isLoading ? <div className="muted">Loading detail sections...</div> : null}
+                    </div>
+                    <div className="users-page__detail-grid">
+                      {(dialogUser?.detail_sections ?? []).map((section) => (
+                        <div className="section-note users-page__detail-card" key={section.key}>
+                          <div className="users-page__detail-card-header">
+                            <strong>{section.title}</strong>
+                            <StatusBadge value={section.status} />
+                          </div>
+                          {section.fields.length > 0 ? (
+                            <div className="users-page__detail-fields">
+                              {section.fields.map((field) => (
+                                <div className="users-page__detail-field" key={`${section.key}-${field.label}`}>
+                                  <strong>{field.label}:</strong> {field.value}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="muted users-page__detail-empty">
+                              {section.message ?? "No detail is currently available for this section."}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
