@@ -62,6 +62,21 @@ def safe_datetime(value: object | None):
     return parse_datetime(value) if isinstance(value, (str, datetime)) else None
 
 
+def auth_row_has_credentials(auth_row: dict[str, object] | None) -> bool:
+    if auth_row is None:
+        return False
+    return bool(auth_row.get("password_changed_at") or auth_row.get("last_login_at"))
+
+
+def effective_membership_status(
+    membership_status: str,
+    auth_row: dict[str, object] | None,
+) -> str:
+    if membership_status == "invited" and auth_row_has_credentials(auth_row):
+        return "active" if bool(auth_row and auth_row.get("is_active")) else "inactive"
+    return membership_status
+
+
 def resolved_avg_improvement_pct(
     *,
     sessions_count: int,
@@ -128,12 +143,14 @@ def build_status_summary(
     invitation: UserInvitation | None,
 ) -> UserStatusSummary:
     detail: str | None = None
-    badge = membership_status
+    badge = effective_membership_status(membership_status, auth_row)
 
     if membership_status in {"active", "inactive"} and auth_row is not None:
         badge = "active" if bool(auth_row.get("is_active")) else "inactive"
         if badge != membership_status:
             detail = "Membership and login state do not currently match."
+    elif membership_status == "invited" and auth_row_has_credentials(auth_row):
+        detail = "This user has credentials, so Herman Admin is treating the membership as active or inactive."
 
     if invitation is not None:
         current_invitation_state = invitation_state(invitation)
@@ -274,7 +291,8 @@ def auth_row_to_summary(
     )
     profile = membership.profile if membership else None
     invitation = latest_invitation_for_user(db, row_user_id_hash, tenant_id)
-    current_status = membership.status if membership is not None else ("active" if bool(row.get("is_active")) else "inactive")
+    membership_status = membership.status if membership is not None else ("active" if bool(row.get("is_active")) else "inactive")
+    current_status = effective_membership_status(membership_status, row)
     created_at = membership.created_at if membership is not None else safe_datetime(row.get("created_at")) or datetime.now(timezone.utc)
     updated_at = membership.updated_at if membership is not None else safe_datetime(row.get("updated_at")) or created_at
 
@@ -302,7 +320,7 @@ def auth_row_to_summary(
             ),
             last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
         ),
-        status_summary=build_status_summary(current_status, row, invitation),
+        status_summary=build_status_summary(membership_status, row, invitation),
         invitation_summary=build_invitation_summary(invitation),
         admin_role=build_admin_role_summary(db, row_user_id_hash),
         detail_sections=build_detail_sections(db, row_user_id_hash) if include_detail_sections else [],
@@ -492,7 +510,8 @@ def auth_row_to_list_summary(
         else []
     )
     profile = membership.profile if membership else None
-    current_status = membership.status if membership is not None else ("active" if bool(row.get("is_active")) else "inactive")
+    membership_status = membership.status if membership is not None else ("active" if bool(row.get("is_active")) else "inactive")
+    current_status = effective_membership_status(membership_status, row)
     created_at = membership.created_at if membership is not None else safe_datetime(row.get("created_at")) or datetime.now(timezone.utc)
     updated_at = membership.updated_at if membership is not None else safe_datetime(row.get("updated_at")) or created_at
 
@@ -520,7 +539,7 @@ def auth_row_to_list_summary(
             ),
             last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
         ),
-        status_summary=build_status_summary(current_status, row, None),
+        status_summary=build_status_summary(membership_status, row, None),
         invitation_summary=None,
         admin_role=admin_role,
         detail_sections=[],
