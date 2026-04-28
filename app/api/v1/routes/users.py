@@ -62,6 +62,19 @@ def safe_datetime(value: object | None):
     return parse_datetime(value) if isinstance(value, (str, datetime)) else None
 
 
+def resolved_avg_improvement_pct(
+    *,
+    sessions_count: int,
+    profile_avg_improvement_pct: int | None,
+    derived_avg_improvement_pct: int | None,
+) -> int | None:
+    if sessions_count <= 0:
+        return None
+    if profile_avg_improvement_pct is not None:
+        return profile_avg_improvement_pct
+    return derived_avg_improvement_pct
+
+
 def latest_invitation_for_user(db: Session, user_id_hash: str, tenant_id: str) -> UserInvitation | None:
     if not table_exists(db, "user_invitations"):
         return None
@@ -282,7 +295,11 @@ def auth_row_to_summary(
             initial_user_type=profile.initial_user_type if profile and profile.initial_user_type is not None else None,
             utilization_level=profile.utilization_level if profile and profile.utilization_level is not None else utilization_level,
             sessions_count=sessions_count,
-            avg_improvement_pct=profile.avg_improvement_pct if profile and profile.avg_improvement_pct is not None else avg_improvement_pct,
+            avg_improvement_pct=resolved_avg_improvement_pct(
+                sessions_count=sessions_count,
+                profile_avg_improvement_pct=profile.avg_improvement_pct if profile else None,
+                derived_avg_improvement_pct=avg_improvement_pct,
+            ),
             last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
         ),
         status_summary=build_status_summary(current_status, row, invitation),
@@ -410,13 +427,17 @@ def safe_membership_to_summary(
                 first_name=fallback_first_name,
                 last_name=fallback_last_name,
                 email=fallback_email,
-                title=membership.profile.title if membership.profile and membership.profile.title else "Member",
-                initial_user_type=membership.profile.initial_user_type if membership.profile else None,
-                utilization_level=membership.profile.utilization_level if membership.profile else None,
+            title=membership.profile.title if membership.profile and membership.profile.title else "Member",
+            initial_user_type=membership.profile.initial_user_type if membership.profile else None,
+            utilization_level=membership.profile.utilization_level if membership.profile else None,
+            sessions_count=membership.profile.sessions_count if membership.profile else 0,
+            avg_improvement_pct=resolved_avg_improvement_pct(
                 sessions_count=membership.profile.sessions_count if membership.profile else 0,
-                avg_improvement_pct=membership.profile.avg_improvement_pct if membership.profile else None,
-                last_activity_at=membership.profile.last_activity_at if membership.profile else None,
+                profile_avg_improvement_pct=membership.profile.avg_improvement_pct if membership.profile else None,
+                derived_avg_improvement_pct=None,
             ),
+            last_activity_at=membership.profile.last_activity_at if membership.profile else None,
+        ),
             status_summary=UserStatusSummary(
                 badge=membership.status,
                 detail="This user membership has incomplete related data, so Herman Admin is showing a safe fallback view.",
@@ -492,7 +513,11 @@ def auth_row_to_list_summary(
             initial_user_type=profile.initial_user_type if profile and profile.initial_user_type is not None else None,
             utilization_level=profile.utilization_level if profile and profile.utilization_level is not None else utilization_level,
             sessions_count=sessions_count,
-            avg_improvement_pct=profile.avg_improvement_pct if profile and profile.avg_improvement_pct is not None else avg_improvement_pct,
+            avg_improvement_pct=resolved_avg_improvement_pct(
+                sessions_count=sessions_count,
+                profile_avg_improvement_pct=profile.avg_improvement_pct if profile else None,
+                derived_avg_improvement_pct=avg_improvement_pct,
+            ),
             last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
         ),
         status_summary=build_status_summary(current_status, row, None),
@@ -523,7 +548,21 @@ def membership_to_list_summary(
             UserGroupMembershipSummary(group_id=item.group_id) for item in group_memberships
         ],
         profile=(
-            UserMembershipProfileSummary.model_validate(membership.profile, from_attributes=True)
+            UserMembershipProfileSummary(
+                first_name=membership.profile.first_name,
+                last_name=membership.profile.last_name,
+                email=membership.profile.email,
+                title=membership.profile.title,
+                initial_user_type=membership.profile.initial_user_type,
+                utilization_level=membership.profile.utilization_level,
+                sessions_count=membership.profile.sessions_count,
+                avg_improvement_pct=resolved_avg_improvement_pct(
+                    sessions_count=membership.profile.sessions_count,
+                    profile_avg_improvement_pct=membership.profile.avg_improvement_pct,
+                    derived_avg_improvement_pct=None,
+                ),
+                last_activity_at=membership.profile.last_activity_at,
+            )
             if membership.profile
             else None
         ),
