@@ -847,7 +847,7 @@ export function UsersPage() {
       {selectedUser ? (
         <div className="dialog-backdrop" role="presentation" onClick={closeUserDialog}>
           <div
-            className="dialog-card"
+            className="dialog-card users-page__dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="user-status-dialog-title"
