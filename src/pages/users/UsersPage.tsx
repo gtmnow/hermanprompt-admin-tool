@@ -1177,7 +1177,8 @@ export function UsersPage() {
                             <div className="users-page__detail-fields">
                               {section.fields.map((field) => (
                                 <div className="users-page__detail-field" key={`${section.key}-${field.label}`}>
-                                  <strong>{field.label}:</strong> {field.value}
+                                  <strong className="users-page__detail-field-label">{field.label}</strong>
+                                  <span className="users-page__detail-field-value">{field.value}</span>
                                 </div>
                               ))}
                             </div>
