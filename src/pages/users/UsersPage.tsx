@@ -653,9 +653,6 @@ export function UsersPage() {
                         <button className="users-page__status-button" type="button" onClick={() => openUserDialog(user)}>
                           <StatusBadge value={statusBadgeValue(user)} />
                         </button>
-                        {user.status_summary?.detail ? (
-                          <div className="muted" style={{ marginTop: 8 }}>{user.status_summary.detail}</div>
-                        ) : null}
                       </td>
                       <td>
                         {user.group_memberships.length > 0
