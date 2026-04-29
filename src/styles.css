@@ -962,6 +962,26 @@ button {
   background: rgba(255, 255, 255, 0.78);
 }
 
+.users-page__name-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.users-page__name-button:hover {
+  color: var(--accent-dark);
+}
+
+.users-page__name-button:focus-visible {
+  outline: 2px solid rgba(14, 165, 233, 0.45);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
 .users-page__primary-toggle {
   align-self: end;
 }

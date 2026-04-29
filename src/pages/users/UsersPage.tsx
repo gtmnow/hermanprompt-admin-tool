@@ -638,7 +638,9 @@ export function UsersPage() {
                   users.map((user) => (
                     <tr key={user.id}>
                       <td className="users-page__user-cell">
-                        <strong>{displayUserName(user)}</strong>
+                        <button className="users-page__name-button" type="button" onClick={() => openUserDialog(user)}>
+                          <strong>{displayUserName(user)}</strong>
+                        </button>
                         <div className="muted">{user.profile?.email ?? "No email on file"}</div>
                         <div className="muted">Hash: {user.user_id_hash}</div>
                       </td>
