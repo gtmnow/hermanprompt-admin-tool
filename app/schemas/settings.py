@@ -89,6 +89,21 @@ class PlatformManagedLlmConfigUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class PlatformManagedLlmConfigTestRequest(BaseModel):
+    provider_type: str = Field(min_length=1, max_length=100)
+    model_name: str = Field(min_length=1, max_length=200)
+    endpoint_url: str = Field(min_length=1, max_length=500)
+    api_key: str = Field(min_length=1, max_length=5000)
+
+
+class PlatformManagedLlmConfigTestResult(BaseModel):
+    validation_result: str
+    provider_echo: str
+    model_accessible: bool
+    latency_ms: int | None = None
+    message: str | None = None
+
+
 class PlatformManagedLlmConfigSummary(BaseModel):
     id: str
     label: str

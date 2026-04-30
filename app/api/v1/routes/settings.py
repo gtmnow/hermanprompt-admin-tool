@@ -1,3 +1,7 @@
+import json
+import time
+from urllib import error, request
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -11,6 +15,8 @@ from app.schemas import (
     ListEnvelope,
     PlatformManagedLlmConfigCreate,
     PlatformManagedLlmConfigSummary,
+    PlatformManagedLlmConfigTestRequest,
+    PlatformManagedLlmConfigTestResult,
     PlatformManagedLlmConfigUpdate,
     PromptUiInstanceConfigCreate,
     PromptUiInstanceConfigSummary,
@@ -26,6 +32,108 @@ from app.secret_vault import get_vault_status, mask_connection_string, resolve_s
 from app.services import ensure_additive_schema_extensions, serialize_model, validate_reseller_capacity, write_audit_log
 
 router = APIRouter()
+
+
+def _join_api_url(base_url: str, path: str) -> str:
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _truncate_error_body(raw: str, limit: int = 240) -> str:
+    compact = " ".join(raw.split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: limit - 3]}..."
+
+
+def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -> PlatformManagedLlmConfigTestResult:
+    provider = payload.provider_type.strip().lower()
+    endpoint_url = payload.endpoint_url.strip()
+    model_name = payload.model_name.strip()
+    api_key = payload.api_key.strip()
+    if not endpoint_url:
+        return PlatformManagedLlmConfigTestResult(
+            validation_result="invalid",
+            provider_echo=payload.provider_type,
+            model_accessible=False,
+            message="Endpoint URL is required",
+        )
+    if not api_key:
+        return PlatformManagedLlmConfigTestResult(
+            validation_result="invalid",
+            provider_echo=payload.provider_type,
+            model_accessible=False,
+            message="LLM key is required",
+        )
+
+    if provider in {"openai", "azure_openai", "xai", "custom"}:
+        target_url = _join_api_url(endpoint_url, "/chat/completions")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+        body = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": "Reply with OK"}],
+            "max_tokens": 5,
+            "temperature": 0,
+        }
+    elif provider == "anthropic":
+        target_url = _join_api_url(endpoint_url, "/messages")
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
+        body = {
+            "model": model_name,
+            "max_tokens": 5,
+            "messages": [{"role": "user", "content": "Reply with OK"}],
+        }
+    else:
+        return PlatformManagedLlmConfigTestResult(
+            validation_result="invalid",
+            provider_echo=payload.provider_type,
+            model_accessible=False,
+            message=f"Provider '{payload.provider_type}' is not supported by the connection tester yet",
+        )
+
+    started_at = time.perf_counter()
+    req = request.Request(
+        target_url,
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=20) as response:
+            response.read()
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        return PlatformManagedLlmConfigTestResult(
+            validation_result="valid",
+            provider_echo=payload.provider_type,
+            model_accessible=True,
+            latency_ms=latency_ms,
+            message="Connection test succeeded",
+        )
+    except error.HTTPError as exc:
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        response_body = exc.read().decode("utf-8", errors="ignore")
+        return PlatformManagedLlmConfigTestResult(
+            validation_result="invalid",
+            provider_echo=payload.provider_type,
+            model_accessible=False,
+            latency_ms=latency_ms,
+            message=f"Provider returned HTTP {exc.code}: {_truncate_error_body(response_body or exc.reason)}",
+        )
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        return PlatformManagedLlmConfigTestResult(
+            validation_result="invalid",
+            provider_echo=payload.provider_type,
+            model_accessible=False,
+            latency_ms=latency_ms,
+            message=f"Connection test failed: {exc}",
+        )
 
 
 def to_platform_llm_summary(record: PlatformManagedLlmConfig) -> PlatformManagedLlmConfigSummary:
@@ -236,6 +344,19 @@ def list_platform_managed_llms(
         total_count=len(items),
         filters={"include_inactive": include_inactive},
     )
+
+
+@router.post("/platform-managed-llms/test", response_model=ResourceEnvelope[PlatformManagedLlmConfigTestResult])
+def test_platform_managed_llm(
+    payload: PlatformManagedLlmConfigTestRequest,
+    principal: Principal = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[PlatformManagedLlmConfigTestResult]:
+    _ = principal
+    _ = db
+    ensure_additive_schema_extensions()
+    result = test_platform_llm_connection(payload)
+    return ResourceEnvelope[PlatformManagedLlmConfigTestResult](resource=result)
 
 
 @router.post("/platform-managed-llms", response_model=ResourceEnvelope[PlatformManagedLlmConfigSummary], status_code=status.HTTP_201_CREATED)

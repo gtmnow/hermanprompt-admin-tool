@@ -6,6 +6,7 @@ import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
 import { formatDateTime } from "../../lib/format";
+import type { PlatformManagedLlmTestResult } from "../../lib/types";
 
 const defaultForm = {
   label: "",
@@ -42,6 +43,8 @@ export function SettingsPage() {
   const [form, setForm] = useState(defaultForm);
   const [promptUiForm, setPromptUiForm] = useState(defaultPromptUiForm);
   const [platformLlmForm, setPlatformLlmForm] = useState(defaultPlatformLlmForm);
+  const [platformLlmTestResult, setPlatformLlmTestResult] = useState<PlatformManagedLlmTestResult | null>(null);
+  const [platformLlmTestFingerprint, setPlatformLlmTestFingerprint] = useState<string | null>(null);
   const [selectedPlatformLlmId, setSelectedPlatformLlmId] = useState<string | null>(null);
   const [platformLlmEditForm, setPlatformLlmEditForm] = useState({
     endpoint_url: "",
@@ -79,6 +82,18 @@ export function SettingsPage() {
     () => platformManagedLlmsQuery.data?.items.filter((instance) => instance.is_active) ?? [],
     [platformManagedLlmsQuery.data],
   );
+  const currentPlatformLlmFingerprint = useMemo(
+    () =>
+      JSON.stringify({
+        provider_type: platformLlmForm.provider_type.trim(),
+        model_name: platformLlmForm.model_name.trim(),
+        endpoint_url: platformLlmForm.endpoint_url.trim(),
+        api_key: platformLlmForm.api_key,
+      }),
+    [platformLlmForm],
+  );
+  const platformLlmTestIsCurrent = platformLlmTestFingerprint === currentPlatformLlmFingerprint;
+  const platformLlmTestPassed = platformLlmTestIsCurrent && platformLlmTestResult?.validation_result === "valid";
 
   const createMutation = useMutation({
     mutationFn: () => tenantApi.createDatabaseInstance(form),
@@ -107,6 +122,19 @@ export function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["prompt-ui-instances"] });
     },
   });
+  const testPlatformLlmMutation = useMutation({
+    mutationFn: () =>
+      tenantApi.testPlatformManagedLlm({
+        provider_type: platformLlmForm.provider_type.trim(),
+        model_name: platformLlmForm.model_name.trim(),
+        endpoint_url: platformLlmForm.endpoint_url.trim(),
+        api_key: platformLlmForm.api_key,
+      }),
+    onSuccess: ({ resource }) => {
+      setPlatformLlmTestResult(resource);
+      setPlatformLlmTestFingerprint(currentPlatformLlmFingerprint);
+    },
+  });
   const createPlatformLlmMutation = useMutation({
     mutationFn: () =>
       tenantApi.createPlatformManagedLlm({
@@ -117,6 +145,8 @@ export function SettingsPage() {
       }),
     onSuccess: () => {
       setPlatformLlmForm(defaultPlatformLlmForm);
+      setPlatformLlmTestResult(null);
+      setPlatformLlmTestFingerprint(null);
       queryClient.invalidateQueries({ queryKey: ["platform-managed-llms"] });
     },
   });
@@ -596,6 +626,63 @@ export function SettingsPage() {
             </div>
           </div>
 
+          <div className="panel" style={{ background: "rgba(248, 250, 252, 0.7)" }}>
+            <div className="stack" style={{ gap: 10 }}>
+              <div>
+                <div className="panel-title" style={{ fontSize: "0.95rem" }}>Test Configuration</div>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  Test the provider URL, model, and key before this HermanScience LLM is saved. A passing current test is required before upload.
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <button
+                  className="secondary-button"
+                  disabled={
+                    !platformLlmForm.provider_type.trim() ||
+                    !platformLlmForm.model_name.trim() ||
+                    !platformLlmForm.endpoint_url.trim() ||
+                    !platformLlmForm.api_key.trim()
+                  }
+                  onClick={() => testPlatformLlmMutation.mutate()}
+                  type="button"
+                >
+                  {testPlatformLlmMutation.isPending ? "Testing..." : "Test Configuration"}
+                </button>
+                {platformLlmTestPassed ? <StatusBadge value="valid" /> : null}
+                {!platformLlmTestPassed && platformLlmTestResult && platformLlmTestIsCurrent ? <StatusBadge value="invalid" /> : null}
+                {!platformLlmTestIsCurrent && platformLlmTestResult ? <StatusBadge value="stale" /> : null}
+              </div>
+
+              {platformLlmTestResult ? (
+                <div className="stack" style={{ gap: 6 }}>
+                  <div className="key-value">
+                    <div className="muted">Result</div>
+                    <div>{platformLlmTestResult.validation_result === "valid" ? "Connection succeeded" : "Connection failed"}</div>
+                  </div>
+                  <div className="key-value">
+                    <div className="muted">Latency</div>
+                    <div>{platformLlmTestResult.latency_ms !== null ? `${platformLlmTestResult.latency_ms} ms` : "Not measured"}</div>
+                  </div>
+                  <div className="section-note">
+                    {platformLlmTestResult.message ?? "No message returned."}
+                  </div>
+                  {!platformLlmTestIsCurrent ? (
+                    <div className="section-note" style={{ color: "#b45309" }}>
+                      The form changed after the last test. Run the test again before saving.
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {testPlatformLlmMutation.isError ? (
+                <div className="section-note" style={{ color: "#b91c1c" }}>
+                  {testPlatformLlmMutation.error instanceof Error ? testPlatformLlmMutation.error.message : "Configuration test failed."}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
           <div>
             <label className="field-label" htmlFor="platform_llm_notes">Notes</label>
             <textarea
@@ -627,7 +714,7 @@ export function SettingsPage() {
 
           <button
             className="primary-button"
-            disabled={!platformLlmForm.model_name.trim()}
+            disabled={!platformLlmForm.model_name.trim() || !platformLlmTestPassed}
             onClick={() => createPlatformLlmMutation.mutate()}
             type="button"
           >

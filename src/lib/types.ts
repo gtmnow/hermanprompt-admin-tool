@@ -362,6 +362,14 @@ export type PlatformManagedLlmConfig = {
   updated_at: string;
 };
 
+export type PlatformManagedLlmTestResult = {
+  validation_result: "valid" | "invalid";
+  provider_echo: string;
+  model_accessible: boolean;
+  latency_ms: number | null;
+  message: string | null;
+};
+
 export type ReportSummary = {
   report_type: string;
   filters: {

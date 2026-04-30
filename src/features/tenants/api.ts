@@ -7,6 +7,7 @@ import type {
   Group,
   ListEnvelope,
   PlatformManagedLlmConfig,
+  PlatformManagedLlmTestResult,
   PromptUiInstanceConfig,
   ReportExportJob,
   ReportExportPayload,
@@ -221,6 +222,9 @@ export const tenantApi = {
   },
   createPlatformManagedLlm(payload: Record<string, unknown>) {
     return api.postResource<PlatformManagedLlmConfig>("/settings/platform-managed-llms", payload);
+  },
+  testPlatformManagedLlm(payload: Record<string, unknown>) {
+    return api.postResource<PlatformManagedLlmTestResult>("/settings/platform-managed-llms/test", payload);
   },
   updatePlatformManagedLlm(configId: string, payload: Record<string, unknown>) {
     return api.patchResource<PlatformManagedLlmConfig>(`/settings/platform-managed-llms/${configId}`, payload);
