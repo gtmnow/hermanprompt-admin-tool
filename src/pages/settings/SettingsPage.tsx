@@ -168,7 +168,7 @@ export function SettingsPage() {
     mutationFn: () =>
       tenantApi.createPlatformManagedLlm({
         ...platformLlmForm,
-        label: platformLlmForm.model_name.trim(),
+        label: platformLlmForm.label.trim(),
         api_key: platformLlmForm.api_key || null,
         secret_reference: null,
       }),
@@ -424,7 +424,8 @@ export function SettingsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>LLM</th>
+                    <th>Label</th>
+                    <th>Model</th>
                     <th>URL</th>
                     <th>Credential Source</th>
                     <th>Status</th>
@@ -434,6 +435,15 @@ export function SettingsPage() {
                 <tbody>
                   {platformManagedLlms.map((item) => (
                     <tr key={item.id}>
+                      <td>
+                        <button
+                          className="link-button"
+                          onClick={() => openPlatformLlmEditor(item.id)}
+                          type="button"
+                        >
+                          {item.label}
+                        </button>
+                      </td>
                       <td>
                         <button
                           className="link-button"
@@ -473,155 +483,156 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <div className="panel stack">
+      </div>
+
+      <div className="panel stack">
+        <div>
+          <h3 className="panel-title">Register Database Instance</h3>
+          <div className="muted" style={{ marginTop: 8 }}>
+            Save reference metadata for known database environments. These records do not switch the live database connection used by the running API.
+          </div>
+        </div>
+
+        <div className="field-row">
           <div>
-            <h3 className="panel-title">Register Database Instance</h3>
-            <div className="muted" style={{ marginTop: 8 }}>
-              Save reference metadata for known database environments. These records do not switch the live database connection used by the running API.
-            </div>
-          </div>
-
-          <div className="field-row">
-            <div>
-              <label className="field-label" htmlFor="db_label">Label</label>
-              <input
-                className="field"
-                id="db_label"
-                value={form.label}
-                onChange={(event) => setForm((current) => ({ ...current, label: event.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="field-label" htmlFor="db_kind">Database Type</label>
-              <select
-                className="field"
-                id="db_kind"
-                value={form.db_kind}
-                onChange={(event) => setForm((current) => ({ ...current, db_kind: event.target.value }))}
-              >
-                <option value="postgresql">PostgreSQL</option>
-                <option value="sqlite">SQLite</option>
-                <option value="mysql">MySQL</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="field-row">
-            <div>
-              <label className="field-label" htmlFor="db_host">Host</label>
-              <input
-                className="field"
-                id="db_host"
-                value={form.host}
-                onChange={(event) => setForm((current) => ({ ...current, host: event.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="field-label" htmlFor="database_name">Database Name</label>
-              <input
-                className="field"
-                id="database_name"
-                value={form.database_name}
-                onChange={(event) => setForm((current) => ({ ...current, database_name: event.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div className="field-row">
-            <div>
-              <label className="field-label" htmlFor="connection_string">Connection String</label>
-              <input
-                className="field"
-                id="connection_string"
-                placeholder="postgresql://user:password@host:port/dbname"
-                type="password"
-                value={form.connection_string}
-                onChange={(event) => setForm((current) => ({ ...current, connection_string: event.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="field-label" htmlFor="connection_secret_reference">External Secret Reference</label>
-              <input
-                className="field"
-                id="connection_secret_reference"
-                placeholder="Use only if the secret already lives in another vault"
-                value={form.connection_secret_reference}
-                onChange={(event) => setForm((current) => ({ ...current, connection_secret_reference: event.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="field-label" htmlFor="connection_string_masked">Masked Display Value</label>
+            <label className="field-label" htmlFor="db_label">Label</label>
             <input
               className="field"
-              id="connection_string_masked"
-              placeholder="postgresql://user:***@host/dbname"
-              value={form.connection_string_masked}
-              onChange={(event) => setForm((current) => ({ ...current, connection_string_masked: event.target.value }))}
+              id="db_label"
+              value={form.label}
+              onChange={(event) => setForm((current) => ({ ...current, label: event.target.value }))}
             />
-            <div className="section-note">
-              Leave this blank when you paste the real connection string above. The backend will generate the masked display value automatically.
-            </div>
           </div>
-
           <div>
-            <label className="field-label" htmlFor="db_notes">Notes</label>
-            <textarea
+            <label className="field-label" htmlFor="db_kind">Database Type</label>
+            <select
               className="field"
-              id="db_notes"
-              rows={4}
-              value={form.notes}
-              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+              id="db_kind"
+              value={form.db_kind}
+              onChange={(event) => setForm((current) => ({ ...current, db_kind: event.target.value }))}
+            >
+              <option value="postgresql">PostgreSQL</option>
+              <option value="sqlite">SQLite</option>
+              <option value="mysql">MySQL</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="field-row">
+          <div>
+            <label className="field-label" htmlFor="db_host">Host</label>
+            <input
+              className="field"
+              id="db_host"
+              value={form.host}
+              onChange={(event) => setForm((current) => ({ ...current, host: event.target.value }))}
             />
           </div>
-
-          <div className="field-row">
-            <div>
-              <label className="field-label" htmlFor="db_active">Set Active</label>
-              <select
-                className="field"
-                id="db_active"
-                value={String(form.is_active)}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    is_active: event.target.value === "true",
-                  }))
-                }
-              >
-                <option value="false">No</option>
-                <option value="true">Yes</option>
-              </select>
-            </div>
-            <div>
-              <label className="field-label" htmlFor="managed_via_db_only">Control Model</label>
-              <select
-                className="field"
-                id="managed_via_db_only"
-                value={String(form.managed_via_db_only)}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    managed_via_db_only: event.target.value === "true",
-                  }))
-                }
-              >
-                <option value="true">DB only</option>
-                <option value="false">Mixed</option>
-              </select>
-            </div>
+          <div>
+            <label className="field-label" htmlFor="database_name">Database Name</label>
+            <input
+              className="field"
+              id="database_name"
+              value={form.database_name}
+              onChange={(event) => setForm((current) => ({ ...current, database_name: event.target.value }))}
+            />
           </div>
-
-          <button
-            className="primary-button"
-            disabled={!form.label.trim()}
-            onClick={() => createMutation.mutate()}
-            type="button"
-          >
-            Save database reference
-          </button>
         </div>
+
+        <div className="field-row">
+          <div>
+            <label className="field-label" htmlFor="connection_string">Connection String</label>
+            <input
+              className="field"
+              id="connection_string"
+              placeholder="postgresql://user:password@host:port/dbname"
+              type="password"
+              value={form.connection_string}
+              onChange={(event) => setForm((current) => ({ ...current, connection_string: event.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="field-label" htmlFor="connection_secret_reference">External Secret Reference</label>
+            <input
+              className="field"
+              id="connection_secret_reference"
+              placeholder="Use only if the secret already lives in another vault"
+              value={form.connection_secret_reference}
+              onChange={(event) => setForm((current) => ({ ...current, connection_secret_reference: event.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="field-label" htmlFor="connection_string_masked">Masked Display Value</label>
+          <input
+            className="field"
+            id="connection_string_masked"
+            placeholder="postgresql://user:***@host/dbname"
+            value={form.connection_string_masked}
+            onChange={(event) => setForm((current) => ({ ...current, connection_string_masked: event.target.value }))}
+          />
+          <div className="section-note">
+            Leave this blank when you paste the real connection string above. The backend will generate the masked display value automatically.
+          </div>
+        </div>
+
+        <div>
+          <label className="field-label" htmlFor="db_notes">Notes</label>
+          <textarea
+            className="field"
+            id="db_notes"
+            rows={4}
+            value={form.notes}
+            onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+          />
+        </div>
+
+        <div className="field-row">
+          <div>
+            <label className="field-label" htmlFor="db_active">Set Active</label>
+            <select
+              className="field"
+              id="db_active"
+              value={String(form.is_active)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  is_active: event.target.value === "true",
+                }))
+              }
+            >
+              <option value="false">No</option>
+              <option value="true">Yes</option>
+            </select>
+          </div>
+          <div>
+            <label className="field-label" htmlFor="managed_via_db_only">Control Model</label>
+            <select
+              className="field"
+              id="managed_via_db_only"
+              value={String(form.managed_via_db_only)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  managed_via_db_only: event.target.value === "true",
+                }))
+              }
+            >
+              <option value="true">DB only</option>
+              <option value="false">Mixed</option>
+            </select>
+          </div>
+        </div>
+
+        <button
+          className="primary-button"
+          disabled={!form.label.trim()}
+          onClick={() => createMutation.mutate()}
+          type="button"
+        >
+          Save database reference
+        </button>
       </div>
 
       <div className="grid grid--two">
@@ -634,10 +645,25 @@ export function SettingsPage() {
           </div>
 
           <div className="field-row">
-            <div>
-              <label className="field-label" htmlFor="platform_llm_provider">Provider</label>
-              <select
-                className="field"
+          <div>
+            <label className="field-label" htmlFor="platform_llm_label">Pool Label</label>
+            <input
+              className="field"
+              id="platform_llm_label"
+              value={platformLlmForm.label}
+              onChange={(event) => setPlatformLlmForm((current) => ({ ...current, label: event.target.value }))}
+              placeholder="OpenAI GPT-5.4 Shared Pool A"
+              type="text"
+            />
+            <div className="section-note">
+              Use a unique label so multiple HermanScience entries can exist for the same model.
+            </div>
+          </div>
+
+          <div>
+            <label className="field-label" htmlFor="platform_llm_provider">Provider</label>
+            <select
+              className="field"
                 id="platform_llm_provider"
                 value={platformLlmForm.provider_type}
                 onChange={(event) => setPlatformLlmForm((current) => ({ ...current, provider_type: event.target.value }))}
@@ -781,7 +807,7 @@ export function SettingsPage() {
 
           <button
             className="primary-button"
-            disabled={!platformLlmForm.model_name.trim() || !platformLlmTestPassed}
+            disabled={!platformLlmForm.label.trim() || !platformLlmForm.model_name.trim() || !platformLlmTestPassed}
             onClick={() => createPlatformLlmMutation.mutate()}
             type="button"
           >
@@ -910,73 +936,74 @@ export function SettingsPage() {
           )}
         </div>
 
-        <div className="panel stack">
-          <div>
-            <h3 className="panel-title">Register Prompt UI</h3>
-            <div className="muted" style={{ marginTop: 8 }}>
-              Save the active Herman Prompt frontend deployment URL used by the admin team.
-            </div>
-          </div>
+      </div>
 
-          <div>
-            <label className="field-label" htmlFor="prompt_ui_label">Label</label>
-            <input
-              className="field"
-              id="prompt_ui_label"
-              value={promptUiForm.label}
-              onChange={(event) => setPromptUiForm((current) => ({ ...current, label: event.target.value }))}
-            />
+      <div className="panel stack">
+        <div>
+          <h3 className="panel-title">Register Prompt UI</h3>
+          <div className="muted" style={{ marginTop: 8 }}>
+            Save the active Herman Prompt frontend deployment URL used by the admin team.
           </div>
-
-          <div>
-            <label className="field-label" htmlFor="prompt_ui_base_url">Base URL</label>
-            <input
-              className="field"
-              id="prompt_ui_base_url"
-              placeholder="https://herman-prompt-demo-production-5b99.up.railway.app"
-              value={promptUiForm.base_url}
-              onChange={(event) => setPromptUiForm((current) => ({ ...current, base_url: event.target.value }))}
-            />
-          </div>
-
-          <div>
-            <label className="field-label" htmlFor="prompt_ui_notes">Notes</label>
-            <textarea
-              className="field"
-              id="prompt_ui_notes"
-              rows={3}
-              value={promptUiForm.notes}
-              onChange={(event) => setPromptUiForm((current) => ({ ...current, notes: event.target.value }))}
-            />
-          </div>
-
-          <div>
-            <label className="field-label" htmlFor="prompt_ui_active">Set Active</label>
-            <select
-              className="field"
-              id="prompt_ui_active"
-              value={String(promptUiForm.is_active)}
-              onChange={(event) =>
-                setPromptUiForm((current) => ({
-                  ...current,
-                  is_active: event.target.value === "true",
-                }))
-              }
-            >
-              <option value="false">No</option>
-              <option value="true">Yes</option>
-            </select>
-          </div>
-
-          <button
-            className="primary-button"
-            disabled={!promptUiForm.label.trim() || !promptUiForm.base_url.trim()}
-            onClick={() => createPromptUiMutation.mutate()}
-            type="button"
-          >
-            Save Prompt UI target
-          </button>
         </div>
+
+        <div>
+          <label className="field-label" htmlFor="prompt_ui_label">Label</label>
+          <input
+            className="field"
+            id="prompt_ui_label"
+            value={promptUiForm.label}
+            onChange={(event) => setPromptUiForm((current) => ({ ...current, label: event.target.value }))}
+          />
+        </div>
+
+        <div>
+          <label className="field-label" htmlFor="prompt_ui_base_url">Base URL</label>
+          <input
+            className="field"
+            id="prompt_ui_base_url"
+            placeholder="https://herman-prompt-demo-production-5b99.up.railway.app"
+            value={promptUiForm.base_url}
+            onChange={(event) => setPromptUiForm((current) => ({ ...current, base_url: event.target.value }))}
+          />
+        </div>
+
+        <div>
+          <label className="field-label" htmlFor="prompt_ui_notes">Notes</label>
+          <textarea
+            className="field"
+            id="prompt_ui_notes"
+            rows={3}
+            value={promptUiForm.notes}
+            onChange={(event) => setPromptUiForm((current) => ({ ...current, notes: event.target.value }))}
+          />
+        </div>
+
+        <div>
+          <label className="field-label" htmlFor="prompt_ui_active">Set Active</label>
+          <select
+            className="field"
+            id="prompt_ui_active"
+            value={String(promptUiForm.is_active)}
+            onChange={(event) =>
+              setPromptUiForm((current) => ({
+                ...current,
+                is_active: event.target.value === "true",
+              }))
+            }
+          >
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </div>
+
+        <button
+          className="primary-button"
+          disabled={!promptUiForm.label.trim() || !promptUiForm.base_url.trim()}
+          onClick={() => createPromptUiMutation.mutate()}
+          type="button"
+        >
+          Save Prompt UI target
+        </button>
       </div>
 
       <div className="panel">
