@@ -172,10 +172,17 @@ export function SettingsPage() {
         api_key: platformLlmForm.api_key || null,
         secret_reference: null,
       }),
-    onSuccess: () => {
+    onSuccess: ({ resource }) => {
       setPlatformLlmForm(defaultPlatformLlmForm);
       setPlatformLlmTestResult(null);
       setPlatformLlmTestFingerprint(null);
+      setSelectedPlatformLlmId(resource.id);
+      setPlatformLlmEditForm({
+        endpoint_url: resource.endpoint_url ?? "",
+        api_key: "",
+        notes: resource.notes ?? "",
+        is_active: resource.is_active,
+      });
       queryClient.invalidateQueries({ queryKey: ["platform-managed-llms"] });
     },
   });
@@ -248,6 +255,31 @@ export function SettingsPage() {
       is_active: selected.is_active,
     });
   };
+
+  useEffect(() => {
+    if (platformManagedLlms.length === 0) {
+      if (selectedPlatformLlmId !== null) {
+        setSelectedPlatformLlmId(null);
+      }
+      return;
+    }
+
+    const selectedStillExists = selectedPlatformLlmId
+      ? platformManagedLlms.some((item) => item.id === selectedPlatformLlmId)
+      : false;
+    if (selectedStillExists) {
+      return;
+    }
+
+    const fallback = platformManagedLlms[0];
+    setSelectedPlatformLlmId(fallback.id);
+    setPlatformLlmEditForm({
+      endpoint_url: fallback.endpoint_url ?? "",
+      api_key: "",
+      notes: fallback.notes ?? "",
+      is_active: fallback.is_active,
+    });
+  }, [platformManagedLlms, selectedPlatformLlmId]);
 
   return (
     <div className="stack">
@@ -659,7 +691,7 @@ export function SettingsPage() {
               <div>
                 <div className="panel-title" style={{ fontSize: "0.95rem" }}>Test Configuration</div>
                 <div className="muted" style={{ marginTop: 6 }}>
-                  Test the provider URL, model, and key before this HermanScience LLM is saved. A passing current test is required before upload.
+                  Test the provider URL, model, and key before this HermanScience LLM is saved. The server runs the validation again before the insert commits to the runtime database.
                 </div>
               </div>
 
@@ -754,6 +786,16 @@ export function SettingsPage() {
           >
             {createPlatformLlmMutation.isPending ? "Saving..." : "Add HermanScience LLM"}
           </button>
+          {createPlatformLlmMutation.isSuccess ? (
+            <div className="section-note" style={{ color: "#166534" }}>
+              HermanScience LLM saved to the runtime database target and opened in the configure panel.
+            </div>
+          ) : null}
+          {createPlatformLlmMutation.isError ? (
+            <div className="section-note" style={{ color: "#b91c1c" }}>
+              {createPlatformLlmMutation.error instanceof Error ? createPlatformLlmMutation.error.message : "Saving the HermanScience LLM failed."}
+            </div>
+          ) : null}
         </div>
 
         <div className="panel stack">
@@ -846,6 +888,21 @@ export function SettingsPage() {
                   {deletePlatformLlmMutation.isPending ? "Deleting..." : "Delete LLM"}
                 </button>
               </div>
+              {updatePlatformLlmMutation.isSuccess ? (
+                <div className="section-note" style={{ color: "#166534" }}>
+                  HermanScience LLM updated in the runtime database target.
+                </div>
+              ) : null}
+              {updatePlatformLlmMutation.isError ? (
+                <div className="section-note" style={{ color: "#b91c1c" }}>
+                  {updatePlatformLlmMutation.error instanceof Error ? updatePlatformLlmMutation.error.message : "Updating the HermanScience LLM failed."}
+                </div>
+              ) : null}
+              {deletePlatformLlmMutation.isError ? (
+                <div className="section-note" style={{ color: "#b91c1c" }}>
+                  {deletePlatformLlmMutation.error instanceof Error ? deletePlatformLlmMutation.error.message : "Deleting the HermanScience LLM failed."}
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="empty-state table-empty-state">Select an LLM from the pool above to configure it.</div>
