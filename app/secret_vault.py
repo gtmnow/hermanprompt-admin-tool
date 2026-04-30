@@ -160,7 +160,7 @@ def store_managed_secret(
     secret_id = str(uuid4())
     secret_ref = f"vault://database-encrypted/{secret_id}"
     token = _build_fernet().encrypt(secret_value.encode("utf-8")).decode("utf-8")
-    masked = mask_secret_value(secret_value, max_length=48) or "***"
+    masked = mask_secret_value(secret_value, max_length=32) or "***"
 
     db.add(
         VaultSecret(
