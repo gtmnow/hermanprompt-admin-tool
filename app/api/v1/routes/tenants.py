@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.core.config import get_settings
+from app.llm_validation import validate_platform_llm_runtime
 from app.models import PlatformManagedLlmConfig, Tenant, TenantLLMConfig, TenantOnboardingStatus, TenantRuntimeSettings
 from app.schemas import (
     ListEnvelope,
@@ -724,6 +725,7 @@ def validate_llm_config(
     if llm_config is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LLM config has not been set")
 
+    live_test_result = None
     if llm_config.credential_mode == "platform_managed":
         if not llm_config.platform_managed_config_id:
             llm_config.credential_status = "invalid"
@@ -742,6 +744,13 @@ def validate_llm_config(
                 llm_config.secret_reference = platform_config.secret_reference
                 llm_config.api_key_masked = platform_config.api_key_masked
                 resolution = resolve_secret_reference(db, llm_config.secret_reference)
+                live_test_result = validate_platform_llm_runtime(
+                    db,
+                    provider_type=llm_config.provider_type,
+                    model_name=llm_config.model_name,
+                    endpoint_url=llm_config.endpoint_url,
+                    secret_reference=llm_config.secret_reference,
+                )
     else:
         resolution = resolve_secret_reference(db, llm_config.secret_reference)
     if not llm_config.provider_type or not llm_config.model_name:
@@ -750,6 +759,11 @@ def validate_llm_config(
     elif not llm_config.secret_reference:
         llm_config.credential_status = "invalid"
         llm_config.last_validation_message = "No vault-backed credential is configured"
+    elif llm_config.credential_mode == "platform_managed" and live_test_result is not None and live_test_result.validation_result != "valid":
+        llm_config.credential_status = "invalid"
+        llm_config.last_validation_message = live_test_result.message
+        if live_test_result.error_code:
+            llm_config.last_validation_message = f"{llm_config.last_validation_message} [{live_test_result.error_code}]"
     elif resolution.resolvable:
         llm_config.credential_status = "valid"
         llm_config.last_validation_message = "Validation succeeded and the vault secret resolved successfully"

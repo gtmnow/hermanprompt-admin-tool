@@ -1,7 +1,3 @@
-import json
-import time
-from urllib import error, request
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.engine import make_url
 from sqlalchemy import func, select
@@ -9,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db import get_db
+from app.llm_validation import test_platform_llm_connection, validate_platform_llm_runtime
 from app.models import DatabaseInstanceConfig, PlatformManagedLlmConfig, PromptUiInstanceConfig, ResellerPartner, ResellerTenantDefaults, ServiceTierDefinition, Tenant, TenantLLMConfig
 from app.schemas import (
     DatabaseInstanceConfigCreate,
@@ -37,17 +34,6 @@ from app.services import ensure_additive_schema_extensions, serialize_model, val
 router = APIRouter()
 
 
-def _join_api_url(base_url: str, path: str) -> str:
-    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
-
-
-def _truncate_error_body(raw: str, limit: int = 240) -> str:
-    compact = " ".join(raw.split())
-    if len(compact) <= limit:
-        return compact
-    return f"{compact[: limit - 3]}..."
-
-
 def get_runtime_database_target_summary() -> RuntimeDatabaseTargetSummary:
     settings = get_settings()
     database_url = settings.database_url or ""
@@ -66,103 +52,6 @@ def get_runtime_database_target_summary() -> RuntimeDatabaseTargetSummary:
         host=host,
         database_name=database_name,
     )
-
-
-def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -> PlatformManagedLlmConfigTestResult:
-    provider = payload.provider_type.strip().lower()
-    endpoint_url = payload.endpoint_url.strip()
-    model_name = payload.model_name.strip()
-    api_key = payload.api_key.strip()
-    if not endpoint_url:
-        return PlatformManagedLlmConfigTestResult(
-            validation_result="invalid",
-            provider_echo=payload.provider_type,
-            model_accessible=False,
-            error_code="ENDPOINT_URL_REQUIRED",
-            message="Endpoint URL is required",
-        )
-    if not api_key:
-        return PlatformManagedLlmConfigTestResult(
-            validation_result="invalid",
-            provider_echo=payload.provider_type,
-            model_accessible=False,
-            error_code="API_KEY_REQUIRED",
-            message="LLM key is required",
-        )
-
-    if provider in {"openai", "azure_openai", "xai", "custom"}:
-        target_url = _join_api_url(endpoint_url, "/chat/completions")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
-        body = {
-            "model": model_name,
-            "messages": [{"role": "user", "content": "Reply with OK"}],
-            "max_completion_tokens": 5,
-            "temperature": 0,
-        }
-    elif provider == "anthropic":
-        target_url = _join_api_url(endpoint_url, "/messages")
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-        }
-        body = {
-            "model": model_name,
-            "max_tokens": 5,
-            "messages": [{"role": "user", "content": "Reply with OK"}],
-        }
-    else:
-        return PlatformManagedLlmConfigTestResult(
-            validation_result="invalid",
-            provider_echo=payload.provider_type,
-            model_accessible=False,
-            error_code="UNSUPPORTED_PROVIDER",
-            message=f"Provider '{payload.provider_type}' is not supported by the connection tester yet",
-        )
-
-    started_at = time.perf_counter()
-    req = request.Request(
-        target_url,
-        data=json.dumps(body).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    try:
-        with request.urlopen(req, timeout=20) as response:
-            response.read()
-        latency_ms = int((time.perf_counter() - started_at) * 1000)
-        return PlatformManagedLlmConfigTestResult(
-            validation_result="valid",
-            provider_echo=payload.provider_type,
-            model_accessible=True,
-            latency_ms=latency_ms,
-            error_code=None,
-            message="Connection test succeeded",
-        )
-    except error.HTTPError as exc:
-        latency_ms = int((time.perf_counter() - started_at) * 1000)
-        response_body = exc.read().decode("utf-8", errors="ignore")
-        return PlatformManagedLlmConfigTestResult(
-            validation_result="invalid",
-            provider_echo=payload.provider_type,
-            model_accessible=False,
-            latency_ms=latency_ms,
-            error_code=f"HTTP_{exc.code}",
-            message=f"Provider returned HTTP {exc.code}: {_truncate_error_body(response_body or exc.reason)}",
-        )
-    except Exception as exc:
-        latency_ms = int((time.perf_counter() - started_at) * 1000)
-        return PlatformManagedLlmConfigTestResult(
-            validation_result="invalid",
-            provider_echo=payload.provider_type,
-            model_accessible=False,
-            latency_ms=latency_ms,
-            error_code=exc.__class__.__name__.upper(),
-            message=f"Connection test failed: {exc}",
-        )
 
 
 def to_platform_llm_summary(record: PlatformManagedLlmConfig) -> PlatformManagedLlmConfigSummary:
@@ -409,13 +298,13 @@ def create_platform_managed_llm(
     payload_data = payload.model_dump(exclude_none=True)
     api_key = payload_data.pop("api_key", None)
     secret_reference = payload_data.pop("secret_reference", None)
-    test_result = test_platform_llm_connection(
-        PlatformManagedLlmConfigTestRequest(
-            provider_type=payload.provider_type,
-            model_name=payload.model_name,
-            endpoint_url=payload.endpoint_url or "",
-            api_key=api_key or "",
-        )
+    test_result = validate_platform_llm_runtime(
+        db,
+        provider_type=payload.provider_type,
+        model_name=payload.model_name,
+        endpoint_url=payload.endpoint_url,
+        api_key=api_key,
+        secret_reference=secret_reference,
     )
     if test_result.validation_result != "valid":
         detail = test_result.message or "LLM configuration test failed"
@@ -476,6 +365,7 @@ def update_platform_managed_llm(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Platform managed LLM config not found")
 
+    previously_active = record.is_active
     before = serialize_model(record)
     updates = payload.model_dump(exclude_none=True)
     api_key = updates.pop("api_key", None)
@@ -502,6 +392,26 @@ def update_platform_managed_llm(
         resolution = resolve_secret_reference(db, secret_reference)
         record.secret_source = resolution.secret_source
         record.vault_provider = resolution.vault_provider
+
+    should_validate_runtime = record.is_active and (
+        "endpoint_url" in updates or
+        api_key is not None or
+        secret_reference is not None or
+        (not previously_active and record.is_active)
+    )
+    if should_validate_runtime:
+        test_result = validate_platform_llm_runtime(
+            db,
+            provider_type=record.provider_type,
+            model_name=record.model_name,
+            endpoint_url=record.endpoint_url,
+            secret_reference=record.secret_reference,
+        )
+        if test_result.validation_result != "valid":
+            detail = test_result.message or "LLM configuration test failed"
+            if test_result.error_code:
+                detail = f"{detail} [{test_result.error_code}]"
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
     write_audit_log(
         db,
