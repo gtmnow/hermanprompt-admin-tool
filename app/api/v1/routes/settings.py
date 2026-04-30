@@ -76,7 +76,7 @@ def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -
         body = {
             "model": model_name,
             "messages": [{"role": "user", "content": "Reply with OK"}],
-            "max_tokens": 5,
+            "max_completion_tokens": 5,
             "temperature": 0,
         }
     elif provider == "anthropic":
