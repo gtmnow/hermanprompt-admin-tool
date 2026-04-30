@@ -324,6 +324,14 @@ export type DatabaseInstanceConfig = {
   updated_at: string;
 };
 
+export type RuntimeDatabaseTarget = {
+  database_url_masked: string;
+  driver: string;
+  host: string | null;
+  database_name: string | null;
+  source: string;
+};
+
 export type SecretVaultStatus = {
   provider: string;
   display_name: string;

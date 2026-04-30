@@ -66,6 +66,10 @@ export function SettingsPage() {
     queryKey: ["database-instances"],
     queryFn: () => tenantApi.listDatabaseInstances(),
   });
+  const runtimeDatabaseTargetQuery = useQuery({
+    queryKey: ["runtime-database-target"],
+    queryFn: () => tenantApi.getRuntimeDatabaseTarget(),
+  });
   const promptUiInstancesQuery = useQuery({
     queryKey: ["prompt-ui-instances"],
     queryFn: () => tenantApi.listPromptUiInstances(),
@@ -79,10 +83,6 @@ export function SettingsPage() {
     queryFn: () => tenantApi.listPlatformManagedLlms(true),
   });
 
-  const activeInstance = useMemo(
-    () => databaseInstancesQuery.data?.items.find((instance) => instance.is_active) ?? null,
-    [databaseInstancesQuery.data],
-  );
   const activePromptUi = useMemo(
     () => promptUiInstancesQuery.data?.items.find((instance) => instance.is_active) ?? null,
     [promptUiInstancesQuery.data],
@@ -218,11 +218,18 @@ export function SettingsPage() {
     },
   });
 
-  if (databaseInstancesQuery.isLoading || promptUiInstancesQuery.isLoading || secretVaultQuery.isLoading || platformManagedLlmsQuery.isLoading) {
+  if (
+    databaseInstancesQuery.isLoading ||
+    runtimeDatabaseTargetQuery.isLoading ||
+    promptUiInstancesQuery.isLoading ||
+    secretVaultQuery.isLoading ||
+    platformManagedLlmsQuery.isLoading
+  ) {
     return <LoadingBlock label="Loading settings..." />;
   }
 
   const instances = databaseInstancesQuery.data?.items ?? [];
+  const runtimeDatabaseTarget = runtimeDatabaseTargetQuery.data?.resource ?? null;
   const promptUiInstances = promptUiInstancesQuery.data?.items ?? [];
   const vaultStatus = secretVaultQuery.data?.resource ?? null;
   const platformManagedLlms = platformManagedLlmsQuery.data?.items ?? [];
@@ -256,42 +263,34 @@ export function SettingsPage() {
       <div className="grid grid--two">
         <div className="panel stack">
           <div>
-            <h3 className="panel-title">Active Database Target</h3>
+            <h3 className="panel-title">Runtime Database Target</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              Keep local development pointed at a safe local target until we deliberately switch the live DB later.
+              HermanScience LLM changes are written to the database configured in the runtime environment variable, not to a saved database-instance record below.
             </div>
           </div>
 
           <div className="key-value">
             <div className="muted">Current target</div>
-            <div>{activeInstance?.label ?? "No active database configured"}</div>
+            <div>{runtimeDatabaseTarget?.database_url_masked ?? "No runtime database configured"}</div>
           </div>
           <div className="key-value">
-            <div className="muted">Type</div>
-            <div>{activeInstance?.db_kind ?? "Not set"}</div>
+            <div className="muted">Driver</div>
+            <div>{runtimeDatabaseTarget?.driver ?? "Not set"}</div>
           </div>
           <div className="key-value">
             <div className="muted">Host</div>
-            <div>{activeInstance?.host ?? "Local / embedded"}</div>
+            <div>{runtimeDatabaseTarget?.host ?? "Local / embedded"}</div>
           </div>
           <div className="key-value">
             <div className="muted">Database</div>
-            <div>{activeInstance?.database_name ?? "Not set"}</div>
+            <div>{runtimeDatabaseTarget?.database_name ?? "Not set"}</div>
           </div>
           <div className="key-value">
-            <div className="muted">Execution mode</div>
-            <div>{activeInstance?.managed_via_db_only ? "DB only" : "Mixed integration"}</div>
-          </div>
-          <div className="key-value">
-            <div className="muted">Credential source</div>
-            <div>{activeInstance?.secret_source ? activeInstance.secret_source.replace("_", " ") : "none"}</div>
-          </div>
-          <div className="key-value">
-            <div className="muted">Vault reference</div>
-            <div style={{ wordBreak: "break-word" }}>{activeInstance?.connection_secret_reference ?? "Not configured"}</div>
+            <div className="muted">Source</div>
+            <div>{runtimeDatabaseTarget?.source ?? "Unknown"}</div>
           </div>
           <div className="section-note">
-            The UI exposes the target database selection and stores it in the admin schema for auditing and later live-environment switching.
+            `Add HermanScience LLM` and `Configure HermanScience LLM` use this runtime target because the API session is bound to `HERMAN_ADMIN_DATABASE_URL`.
           </div>
         </div>
 
@@ -445,7 +444,7 @@ export function SettingsPage() {
           <div>
             <h3 className="panel-title">Register Database Instance</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              Save the real connection string into the vault and keep only the masked display value plus secret reference in the admin schema.
+              Save reference metadata for known database environments. These records do not switch the live database connection used by the running API.
             </div>
           </div>
 
@@ -926,7 +925,7 @@ export function SettingsPage() {
         <div className="split-header">
           <div>
             <h3 className="panel-title">Configured Database Instances</h3>
-            <div className="muted">Use this list to verify the active target before we point the tool at the live HermanPrompt database.</div>
+            <div className="muted">These are saved reference records for operators. The running application still writes through the environment-configured runtime database shown above.</div>
           </div>
         </div>
 

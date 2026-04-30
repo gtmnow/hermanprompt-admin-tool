@@ -17,6 +17,7 @@ import type {
   ResellerTenantDefaults,
   ReportSummary,
   ResourceEnvelope,
+  RuntimeDatabaseTarget,
   SecretVaultStatus,
   ServiceTierDefinition,
   SystemOverview,
@@ -212,6 +213,9 @@ export const tenantApi = {
   },
   listDatabaseInstances() {
     return api.getList<DatabaseInstanceConfig>("/settings/database-instances");
+  },
+  getRuntimeDatabaseTarget() {
+    return api.getResource<RuntimeDatabaseTarget>("/settings/runtime-database-target");
   },
   getSecretVaultStatus() {
     return api.getResource<SecretVaultStatus>("/settings/secret-vault");

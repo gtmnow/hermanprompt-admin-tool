@@ -3,6 +3,14 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class RuntimeDatabaseTargetSummary(BaseModel):
+    database_url_masked: str
+    driver: str
+    host: str | None = None
+    database_name: str | None = None
+    source: str = "HERMAN_ADMIN_DATABASE_URL"
+
+
 class DatabaseInstanceConfigCreate(BaseModel):
     label: str = Field(min_length=1, max_length=200)
     db_kind: str = "postgresql"

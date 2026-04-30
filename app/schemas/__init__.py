@@ -29,6 +29,7 @@ from app.schemas.settings import (
     PromptUiInstanceConfigCreate,
     PromptUiInstanceConfigSummary,
     PromptUiInstanceConfigUpdate,
+    RuntimeDatabaseTargetSummary,
     SecretVaultStatusSummary,
 )
 from app.schemas.service_tiers import (
@@ -91,6 +92,7 @@ __all__ = [
     "PromptUiInstanceConfigCreate",
     "PromptUiInstanceConfigSummary",
     "PromptUiInstanceConfigUpdate",
+    "RuntimeDatabaseTargetSummary",
     "LaunchExchangeRequest",
     "SecretVaultStatusSummary",
     "Group",

@@ -3,9 +3,11 @@ import time
 from urllib import error, request
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy.engine import make_url
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db import get_db
 from app.models import DatabaseInstanceConfig, PlatformManagedLlmConfig, PromptUiInstanceConfig, ResellerPartner, ResellerTenantDefaults, ServiceTierDefinition, Tenant, TenantLLMConfig
 from app.schemas import (
@@ -22,6 +24,7 @@ from app.schemas import (
     PromptUiInstanceConfigSummary,
     PromptUiInstanceConfigUpdate,
     ResourceEnvelope,
+    RuntimeDatabaseTargetSummary,
     SecretVaultStatusSummary,
     ServiceTierDefinitionCreate,
     ServiceTierDefinitionSummary,
@@ -43,6 +46,26 @@ def _truncate_error_body(raw: str, limit: int = 240) -> str:
     if len(compact) <= limit:
         return compact
     return f"{compact[: limit - 3]}..."
+
+
+def get_runtime_database_target_summary() -> RuntimeDatabaseTargetSummary:
+    settings = get_settings()
+    database_url = settings.database_url or ""
+    url = make_url(database_url)
+    database_name = url.database
+    host = url.host
+
+    if url.drivername.startswith("sqlite"):
+        host = None
+    if database_name and url.drivername.startswith("sqlite"):
+        database_name = database_name.removeprefix("./")
+
+    return RuntimeDatabaseTargetSummary(
+        database_url_masked=mask_connection_string(database_url) or "***",
+        driver=url.drivername,
+        host=host,
+        database_name=database_name,
+    )
 
 
 def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -> PlatformManagedLlmConfigTestResult:
@@ -323,6 +346,16 @@ def get_secret_vault(
     ensure_additive_schema_extensions()
     status_summary = SecretVaultStatusSummary.model_validate(get_vault_status(db), from_attributes=True)
     return ResourceEnvelope[SecretVaultStatusSummary](resource=status_summary)
+
+
+@router.get("/runtime-database-target", response_model=ResourceEnvelope[RuntimeDatabaseTargetSummary])
+def get_runtime_database_target(
+    principal: Principal = Depends(require_permission("system_health.read")),
+) -> ResourceEnvelope[RuntimeDatabaseTargetSummary]:
+    _ = principal
+    ensure_additive_schema_extensions()
+    summary = get_runtime_database_target_summary()
+    return ResourceEnvelope[RuntimeDatabaseTargetSummary](resource=summary)
 
 
 @router.get("/platform-managed-llms", response_model=ListEnvelope[PlatformManagedLlmConfigSummary])
