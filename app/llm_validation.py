@@ -53,7 +53,6 @@ def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -
             "model": model_name,
             "messages": [{"role": "user", "content": "Reply with OK"}],
             "max_completion_tokens": 5,
-            "temperature": 0,
         }
     elif provider == "anthropic":
         target_url = _join_api_url(endpoint_url, "/messages")
