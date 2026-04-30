@@ -225,36 +225,7 @@ export function SettingsPage() {
     },
   });
 
-  if (
-    databaseInstancesQuery.isLoading ||
-    runtimeDatabaseTargetQuery.isLoading ||
-    promptUiInstancesQuery.isLoading ||
-    secretVaultQuery.isLoading ||
-    platformManagedLlmsQuery.isLoading
-  ) {
-    return <LoadingBlock label="Loading settings..." />;
-  }
-
-  const instances = databaseInstancesQuery.data?.items ?? [];
-  const runtimeDatabaseTarget = runtimeDatabaseTargetQuery.data?.resource ?? null;
-  const promptUiInstances = promptUiInstancesQuery.data?.items ?? [];
-  const vaultStatus = secretVaultQuery.data?.resource ?? null;
   const platformManagedLlms = platformManagedLlmsQuery.data?.items ?? [];
-  const selectedPlatformLlm = platformManagedLlms.find((item) => item.id === selectedPlatformLlmId) ?? null;
-
-  const openPlatformLlmEditor = (configId: string) => {
-    const selected = platformManagedLlms.find((item) => item.id === configId);
-    if (!selected) {
-      return;
-    }
-    setSelectedPlatformLlmId(configId);
-    setPlatformLlmEditForm({
-      endpoint_url: selected.endpoint_url ?? "",
-      api_key: "",
-      notes: selected.notes ?? "",
-      is_active: selected.is_active,
-    });
-  };
 
   useEffect(() => {
     if (platformManagedLlms.length === 0) {
@@ -280,6 +251,36 @@ export function SettingsPage() {
       is_active: fallback.is_active,
     });
   }, [platformManagedLlms, selectedPlatformLlmId]);
+
+  if (
+    databaseInstancesQuery.isLoading ||
+    runtimeDatabaseTargetQuery.isLoading ||
+    promptUiInstancesQuery.isLoading ||
+    secretVaultQuery.isLoading ||
+    platformManagedLlmsQuery.isLoading
+  ) {
+    return <LoadingBlock label="Loading settings..." />;
+  }
+
+  const instances = databaseInstancesQuery.data?.items ?? [];
+  const runtimeDatabaseTarget = runtimeDatabaseTargetQuery.data?.resource ?? null;
+  const promptUiInstances = promptUiInstancesQuery.data?.items ?? [];
+  const vaultStatus = secretVaultQuery.data?.resource ?? null;
+  const selectedPlatformLlm = platformManagedLlms.find((item) => item.id === selectedPlatformLlmId) ?? null;
+
+  const openPlatformLlmEditor = (configId: string) => {
+    const selected = platformManagedLlms.find((item) => item.id === configId);
+    if (!selected) {
+      return;
+    }
+    setSelectedPlatformLlmId(configId);
+    setPlatformLlmEditForm({
+      endpoint_url: selected.endpoint_url ?? "",
+      api_key: "",
+      notes: selected.notes ?? "",
+      is_active: selected.is_active,
+    });
+  };
 
   return (
     <div className="stack">
