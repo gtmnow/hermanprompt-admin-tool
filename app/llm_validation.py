@@ -49,10 +49,12 @@ def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }
+        # Keep the compatibility probe minimal for OpenAI-style chat APIs.
+        # Optional generation controls vary across model families and providers,
+        # so only send the fields that are broadly required to verify runtime use.
         body = {
             "model": model_name,
             "messages": [{"role": "user", "content": "Reply with OK"}],
-            "max_completion_tokens": 5,
         }
     elif provider == "anthropic":
         target_url = _join_api_url(endpoint_url, "/messages")
