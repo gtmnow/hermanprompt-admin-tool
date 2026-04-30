@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -32,10 +32,17 @@ const defaultPlatformLlmForm = {
   label: "",
   provider_type: "openai",
   model_name: "gpt-5.4",
-  endpoint_url: "",
+  endpoint_url: "https://api.openai.com/v1",
   api_key: "",
   notes: "",
   is_active: true,
+};
+
+const providerDefaultEndpoints: Record<string, string> = {
+  openai: "https://api.openai.com/v1",
+  azure_openai: "https://YOUR-RESOURCE-NAME.openai.azure.com/openai/v1",
+  anthropic: "https://api.anthropic.com/v1",
+  xai: "https://api.x.ai/v1",
 };
 
 export function SettingsPage() {
@@ -52,6 +59,8 @@ export function SettingsPage() {
     notes: "",
     is_active: true,
   });
+  const previousProviderRef = useRef(platformLlmForm.provider_type);
+  const previousEndpointRef = useRef(platformLlmForm.endpoint_url);
 
   const databaseInstancesQuery = useQuery({
     queryKey: ["database-instances"],
@@ -94,6 +103,26 @@ export function SettingsPage() {
   );
   const platformLlmTestIsCurrent = platformLlmTestFingerprint === currentPlatformLlmFingerprint;
   const platformLlmTestPassed = platformLlmTestIsCurrent && platformLlmTestResult?.validation_result === "valid";
+
+  useEffect(() => {
+    const previousProvider = previousProviderRef.current;
+    const previousEndpoint = previousEndpointRef.current;
+    const currentProvider = platformLlmForm.provider_type;
+    const currentEndpoint = platformLlmForm.endpoint_url;
+    if (previousProvider !== currentProvider) {
+      const previousDefault = providerDefaultEndpoints[previousProvider] ?? "";
+      const nextDefault = providerDefaultEndpoints[currentProvider] ?? "";
+      const shouldAutofill =
+        !currentEndpoint.trim() ||
+        currentEndpoint === previousEndpoint ||
+        currentEndpoint === previousDefault;
+      if (shouldAutofill && currentEndpoint !== nextDefault) {
+        setPlatformLlmForm((current) => ({ ...current, endpoint_url: nextDefault }));
+      }
+    }
+    previousProviderRef.current = currentProvider;
+    previousEndpointRef.current = currentEndpoint;
+  }, [platformLlmForm.endpoint_url, platformLlmForm.provider_type]);
 
   const createMutation = useMutation({
     mutationFn: () => tenantApi.createDatabaseInstance(form),
@@ -660,6 +689,12 @@ export function SettingsPage() {
                     <div className="muted">Result</div>
                     <div>{platformLlmTestResult.validation_result === "valid" ? "Connection succeeded" : "Connection failed"}</div>
                   </div>
+                  {platformLlmTestResult.error_code ? (
+                    <div className="key-value">
+                      <div className="muted">Error code</div>
+                      <div>{platformLlmTestResult.error_code}</div>
+                    </div>
+                  ) : null}
                   <div className="key-value">
                     <div className="muted">Latency</div>
                     <div>{platformLlmTestResult.latency_ms !== null ? `${platformLlmTestResult.latency_ms} ms` : "Not measured"}</div>

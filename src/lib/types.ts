@@ -367,6 +367,7 @@ export type PlatformManagedLlmTestResult = {
   provider_echo: string;
   model_accessible: boolean;
   latency_ms: number | null;
+  error_code: string | null;
   message: string | null;
 };
 

@@ -101,6 +101,7 @@ class PlatformManagedLlmConfigTestResult(BaseModel):
     provider_echo: str
     model_accessible: bool
     latency_ms: int | None = None
+    error_code: str | None = None
     message: str | None = None
 
 

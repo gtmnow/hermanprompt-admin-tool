@@ -55,6 +55,7 @@ def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -
             validation_result="invalid",
             provider_echo=payload.provider_type,
             model_accessible=False,
+            error_code="ENDPOINT_URL_REQUIRED",
             message="Endpoint URL is required",
         )
     if not api_key:
@@ -62,6 +63,7 @@ def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -
             validation_result="invalid",
             provider_echo=payload.provider_type,
             model_accessible=False,
+            error_code="API_KEY_REQUIRED",
             message="LLM key is required",
         )
 
@@ -94,6 +96,7 @@ def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -
             validation_result="invalid",
             provider_echo=payload.provider_type,
             model_accessible=False,
+            error_code="UNSUPPORTED_PROVIDER",
             message=f"Provider '{payload.provider_type}' is not supported by the connection tester yet",
         )
 
@@ -113,6 +116,7 @@ def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -
             provider_echo=payload.provider_type,
             model_accessible=True,
             latency_ms=latency_ms,
+            error_code=None,
             message="Connection test succeeded",
         )
     except error.HTTPError as exc:
@@ -123,6 +127,7 @@ def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -
             provider_echo=payload.provider_type,
             model_accessible=False,
             latency_ms=latency_ms,
+            error_code=f"HTTP_{exc.code}",
             message=f"Provider returned HTTP {exc.code}: {_truncate_error_body(response_body or exc.reason)}",
         )
     except Exception as exc:
@@ -132,6 +137,7 @@ def test_platform_llm_connection(payload: PlatformManagedLlmConfigTestRequest) -
             provider_echo=payload.provider_type,
             model_accessible=False,
             latency_ms=latency_ms,
+            error_code=exc.__class__.__name__.upper(),
             message=f"Connection test failed: {exc}",
         )
 
@@ -370,6 +376,19 @@ def create_platform_managed_llm(
     payload_data = payload.model_dump(exclude_none=True)
     api_key = payload_data.pop("api_key", None)
     secret_reference = payload_data.pop("secret_reference", None)
+    test_result = test_platform_llm_connection(
+        PlatformManagedLlmConfigTestRequest(
+            provider_type=payload.provider_type,
+            model_name=payload.model_name,
+            endpoint_url=payload.endpoint_url or "",
+            api_key=api_key or "",
+        )
+    )
+    if test_result.validation_result != "valid":
+        detail = test_result.message or "LLM configuration test failed"
+        if test_result.error_code:
+            detail = f"{detail} [{test_result.error_code}]"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
     record = PlatformManagedLlmConfig(**payload_data)
     db.add(record)
     db.flush()
