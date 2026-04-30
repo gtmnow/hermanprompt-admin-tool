@@ -2,6 +2,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import get_settings
@@ -16,6 +17,33 @@ if not settings.database_url:
     raise RuntimeError(
         "HERMAN_ADMIN_DATABASE_URL is required. Refusing to start without an explicit database configuration."
     )
+
+database_url = make_url(settings.database_url)
+enforce_runtime_database_target = (
+    settings.enforce_runtime_database_target
+    if settings.enforce_runtime_database_target is not None
+    else settings.environment != "development"
+)
+required_host = settings.runtime_database_required_host or (
+    "interchange.proxy.rlwy.net" if enforce_runtime_database_target else None
+)
+required_name = settings.runtime_database_required_name or (
+    "railway" if enforce_runtime_database_target else None
+)
+
+if enforce_runtime_database_target:
+    if database_url.drivername.startswith("sqlite"):
+        raise RuntimeError(
+            "Refusing to start: Herman Admin must use the Railway Postgres runtime database outside development."
+        )
+    if required_host and database_url.host != required_host:
+        raise RuntimeError(
+            f"Refusing to start: runtime database host must be '{required_host}', got '{database_url.host}'."
+        )
+    if required_name and database_url.database != required_name:
+        raise RuntimeError(
+            f"Refusing to start: runtime database name must be '{required_name}', got '{database_url.database}'."
+        )
 
 if settings.database_url.startswith("sqlite:///"):
     db_path = settings.database_url.removeprefix("sqlite:///")

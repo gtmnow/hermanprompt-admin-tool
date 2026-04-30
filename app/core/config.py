@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     auth_launch_param_name: str = "launch_token"
     auth_login_url: str = "https://hermanportal-production.up.railway.app/login"
     allow_dev_header_auth: bool = False
+    enforce_runtime_database_target: bool | None = None
+    runtime_database_required_host: str | None = None
+    runtime_database_required_name: str | None = None
     launch_secret: str = Field(
         default="test-admin-launch-secret",
         validation_alias=AliasChoices("HERMAN_ADMIN_LAUNCH_SECRET", "HERMANADMIN_LAUNCH_SECRET"),
