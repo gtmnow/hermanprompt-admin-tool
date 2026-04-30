@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy.engine import make_url
+import logging
+
 from sqlalchemy import func, select
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.core.config import get_settings
 from app.db import get_db
@@ -32,6 +35,7 @@ from app.secret_vault import get_vault_status, mask_connection_string, resolve_s
 from app.services import ensure_additive_schema_extensions, serialize_model, validate_reseller_capacity, write_audit_log
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def get_runtime_database_target_summary() -> RuntimeDatabaseTargetSummary:
@@ -298,6 +302,20 @@ def create_platform_managed_llm(
     payload_data = payload.model_dump(exclude_none=True)
     api_key = payload_data.pop("api_key", None)
     secret_reference = payload_data.pop("secret_reference", None)
+    log_context = {
+        "request_id": request_id,
+        "admin_id": principal.admin_id,
+        "label": payload.label,
+        "provider_type": payload.provider_type,
+        "model_name": payload.model_name,
+        "has_endpoint_url": bool(payload.endpoint_url),
+        "has_api_key": bool(api_key),
+        "has_secret_reference": bool(secret_reference),
+        "is_active": payload.is_active,
+    }
+    logger.info("platform-managed LLM create started", extra={"context": log_context})
+
+    logger.info("platform-managed LLM create validating runtime configuration", extra={"context": log_context})
     test_result = validate_platform_llm_runtime(
         db,
         provider_type=payload.provider_type,
@@ -307,48 +325,137 @@ def create_platform_managed_llm(
         secret_reference=secret_reference,
     )
     if test_result.validation_result != "valid":
+        logger.warning(
+            "platform-managed LLM create validation failed",
+            extra={
+                "context": {
+                    **log_context,
+                    "validation_result": test_result.validation_result,
+                    "error_code": test_result.error_code,
+                    "latency_ms": test_result.latency_ms,
+                }
+            },
+        )
         detail = test_result.message or "LLM configuration test failed"
         if test_result.error_code:
             detail = f"{detail} [{test_result.error_code}]"
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+    logger.info(
+        "platform-managed LLM create validation passed",
+        extra={"context": {**log_context, "latency_ms": test_result.latency_ms}},
+    )
     record = PlatformManagedLlmConfig(**payload_data)
     db.add(record)
-    db.flush()
+    try:
+        db.flush()
+        logger.info(
+            "platform-managed LLM create base row flushed",
+            extra={"context": {**log_context, "config_id": record.id}},
+        )
+    except IntegrityError as exc:
+        logger.exception(
+            "platform-managed LLM create base row flush failed",
+            extra={"context": log_context},
+        )
+        db.rollback()
+        if "platform_managed_llm_configs" in str(exc.orig) and "label" in str(exc.orig):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A HermanScience LLM with this label already exists. Choose a different label.",
+            ) from exc
+        raise
 
     if api_key:
-        stored = store_managed_secret(
-            db,
-            secret_value=api_key,
-            scope_type="platform_llm",
-            scope_id=record.id,
-            secret_kind="llm_api_key",
-            display_name=f"{record.label} platform-managed LLM key",
-            created_by_admin_user_id=principal.admin_id,
+        logger.info(
+            "platform-managed LLM create storing managed secret",
+            extra={"context": {**log_context, "config_id": record.id}},
         )
+        try:
+            stored = store_managed_secret(
+                db,
+                secret_value=api_key,
+                scope_type="platform_llm",
+                scope_id=record.id,
+                secret_kind="llm_api_key",
+                display_name=f"{record.label} platform-managed LLM key",
+                created_by_admin_user_id=principal.admin_id,
+            )
+        except Exception:
+            logger.exception(
+                "platform-managed LLM create managed secret storage failed",
+                extra={"context": {**log_context, "config_id": record.id}},
+            )
+            raise
         record.secret_reference = stored.secret_reference
         record.api_key_masked = stored.secret_masked
         record.secret_source = stored.secret_source
         record.vault_provider = stored.vault_provider
+        logger.info(
+            "platform-managed LLM create managed secret stored",
+            extra={"context": {**log_context, "config_id": record.id, "secret_source": stored.secret_source}},
+        )
     elif secret_reference:
         record.secret_reference = secret_reference
         resolution = resolve_secret_reference(db, secret_reference)
         record.secret_source = resolution.secret_source
         record.vault_provider = resolution.vault_provider
+        logger.info(
+            "platform-managed LLM create attached external secret reference",
+            extra={
+                "context": {
+                    **log_context,
+                    "config_id": record.id,
+                    "secret_source": resolution.secret_source,
+                    "vault_provider": resolution.vault_provider,
+                    "secret_reference_resolvable": resolution.resolvable,
+                }
+            },
+        )
     else:
         record.secret_source = "none"
         record.vault_provider = None
+        logger.info(
+            "platform-managed LLM create proceeding without secret reference",
+            extra={"context": {**log_context, "config_id": record.id}},
+        )
 
-    write_audit_log(
-        db,
-        principal,
-        action_type="settings.platform_managed_llm.create",
-        target_type="platform_managed_llm_config",
-        target_id=record.id,
-        after=serialize_model(record),
-        request_id=request_id,
+    logger.info(
+        "platform-managed LLM create writing audit log",
+        extra={"context": {**log_context, "config_id": record.id}},
     )
-    db.commit()
+    try:
+        write_audit_log(
+            db,
+            principal,
+            action_type="settings.platform_managed_llm.create",
+            target_type="platform_managed_llm_config",
+            target_id=record.id,
+            after=serialize_model(record),
+            request_id=request_id,
+        )
+    except Exception:
+        logger.exception(
+            "platform-managed LLM create audit log write failed",
+            extra={"context": {**log_context, "config_id": record.id}},
+        )
+        raise
+    logger.info(
+        "platform-managed LLM create committing transaction",
+        extra={"context": {**log_context, "config_id": record.id}},
+    )
+    try:
+        db.commit()
+    except Exception:
+        logger.exception(
+            "platform-managed LLM create commit failed",
+            extra={"context": {**log_context, "config_id": record.id}},
+        )
+        raise
     db.refresh(record)
+    logger.info(
+        "platform-managed LLM create completed",
+        extra={"context": {**log_context, "config_id": record.id}},
+    )
     return ResourceEnvelope[PlatformManagedLlmConfigSummary](resource=to_platform_llm_summary(record), updated_at=record.updated_at)
 
 
