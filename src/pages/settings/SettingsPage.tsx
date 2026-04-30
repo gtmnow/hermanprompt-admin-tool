@@ -255,7 +255,7 @@ export function SettingsPage() {
         <div>
           <h1 className="page-title">Settings</h1>
           <p className="page-subtitle">
-            Configure which database instance this admin tool points at. All admin actions stay DB-only and do not call Herman Prompt or Herman Transform directly.
+            Confirm the live connected runtime database before doing writes, then manage saved admin-side reference records below.
           </p>
         </div>
       </div>
@@ -586,7 +586,7 @@ export function SettingsPage() {
             onClick={() => createMutation.mutate()}
             type="button"
           >
-            Save database target
+            Save database reference
           </button>
         </div>
       </div>
