@@ -33,19 +33,22 @@ const defaultPlatformLlmForm = {
   model_name: "gpt-5.4",
   endpoint_url: "",
   api_key: "",
-  secret_reference: "",
   notes: "",
   is_active: true,
 };
-
-type SecretSelection = "local_storage" | "encrypted_vault";
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState(defaultForm);
   const [promptUiForm, setPromptUiForm] = useState(defaultPromptUiForm);
   const [platformLlmForm, setPlatformLlmForm] = useState(defaultPlatformLlmForm);
-  const [platformLlmSecretSelection, setPlatformLlmSecretSelection] = useState<SecretSelection>("local_storage");
+  const [selectedPlatformLlmId, setSelectedPlatformLlmId] = useState<string | null>(null);
+  const [platformLlmEditForm, setPlatformLlmEditForm] = useState({
+    endpoint_url: "",
+    api_key: "",
+    notes: "",
+    is_active: true,
+  });
 
   const databaseInstancesQuery = useQuery({
     queryKey: ["database-instances"],
@@ -108,12 +111,12 @@ export function SettingsPage() {
     mutationFn: () =>
       tenantApi.createPlatformManagedLlm({
         ...platformLlmForm,
-        api_key: platformLlmSecretSelection === "local_storage" ? platformLlmForm.api_key || null : null,
-        secret_reference: platformLlmSecretSelection === "encrypted_vault" ? platformLlmForm.secret_reference || null : null,
+        label: platformLlmForm.model_name.trim(),
+        api_key: platformLlmForm.api_key || null,
+        secret_reference: null,
       }),
     onSuccess: () => {
       setPlatformLlmForm(defaultPlatformLlmForm);
-      setPlatformLlmSecretSelection("local_storage");
       queryClient.invalidateQueries({ queryKey: ["platform-managed-llms"] });
     },
   });
@@ -121,6 +124,37 @@ export function SettingsPage() {
     mutationFn: ({ configId, is_active }: { configId: string; is_active: boolean }) =>
       tenantApi.updatePlatformManagedLlm(configId, { is_active }),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["platform-managed-llms"] });
+    },
+  });
+  const updatePlatformLlmMutation = useMutation({
+    mutationFn: () =>
+      selectedPlatformLlmId
+        ? tenantApi.updatePlatformManagedLlm(selectedPlatformLlmId, {
+            endpoint_url: platformLlmEditForm.endpoint_url || null,
+            api_key: platformLlmEditForm.api_key || null,
+            notes: platformLlmEditForm.notes || null,
+            is_active: platformLlmEditForm.is_active,
+          })
+        : Promise.reject(new Error("No HermanScience LLM selected")),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["platform-managed-llms"] });
+      setPlatformLlmEditForm((current) => ({ ...current, api_key: "" }));
+    },
+  });
+  const deletePlatformLlmMutation = useMutation({
+    mutationFn: () =>
+      selectedPlatformLlmId
+        ? tenantApi.deletePlatformManagedLlm(selectedPlatformLlmId)
+        : Promise.reject(new Error("No HermanScience LLM selected")),
+    onSuccess: () => {
+      setSelectedPlatformLlmId(null);
+      setPlatformLlmEditForm({
+        endpoint_url: "",
+        api_key: "",
+        notes: "",
+        is_active: true,
+      });
       queryClient.invalidateQueries({ queryKey: ["platform-managed-llms"] });
     },
   });
@@ -133,6 +167,21 @@ export function SettingsPage() {
   const promptUiInstances = promptUiInstancesQuery.data?.items ?? [];
   const vaultStatus = secretVaultQuery.data?.resource ?? null;
   const platformManagedLlms = platformManagedLlmsQuery.data?.items ?? [];
+  const selectedPlatformLlm = platformManagedLlms.find((item) => item.id === selectedPlatformLlmId) ?? null;
+
+  const openPlatformLlmEditor = (configId: string) => {
+    const selected = platformManagedLlms.find((item) => item.id === configId);
+    if (!selected) {
+      return;
+    }
+    setSelectedPlatformLlmId(configId);
+    setPlatformLlmEditForm({
+      endpoint_url: selected.endpoint_url ?? "",
+      api_key: "",
+      notes: selected.notes ?? "",
+      is_active: selected.is_active,
+    });
+  };
 
   return (
     <div className="stack">
@@ -262,9 +311,9 @@ export function SettingsPage() {
 
         <div className="panel stack">
           <div>
-            <h3 className="panel-title">Platform-Managed LLM Pool</h3>
+            <h3 className="panel-title">HermanScience LLM Pool</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              Maintain the shared HermanScience-managed LLMs that onboarding teams can assign to organizations before those orgs have their own licenses.
+              Maintain the shared HermanScience-provided LLMs that onboarding teams can assign to organizations before those orgs have their own licenses.
             </div>
           </div>
 
@@ -285,28 +334,45 @@ export function SettingsPage() {
                 <thead>
                   <tr>
                     <th>LLM</th>
+                    <th>URL</th>
                     <th>Credential Source</th>
                     <th>Status</th>
-                    <th>Action</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {platformManagedLlms.map((item) => (
                     <tr key={item.id}>
                       <td>
-                        <strong>{item.label}</strong>
-                        <div className="muted">{item.provider_type} • {item.model_name}</div>
+                        <button
+                          className="link-button"
+                          onClick={() => openPlatformLlmEditor(item.id)}
+                          type="button"
+                        >
+                          {item.model_name}
+                        </button>
+                        <div className="muted">{item.provider_type}</div>
                       </td>
+                      <td style={{ wordBreak: "break-word" }}>{item.endpoint_url ?? "Not configured"}</td>
                       <td>{item.secret_source.replace("_", " ")}</td>
                       <td><StatusBadge value={item.is_active ? "active" : "inactive"} /></td>
                       <td>
-                        <button
-                          className="secondary-button"
-                          onClick={() => togglePlatformLlmMutation.mutate({ configId: item.id, is_active: !item.is_active })}
-                          type="button"
-                        >
-                          {item.is_active ? "Disable" : "Enable"}
-                        </button>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            className="ghost-button"
+                            onClick={() => openPlatformLlmEditor(item.id)}
+                            type="button"
+                          >
+                            Configure
+                          </button>
+                          <button
+                            className="secondary-button"
+                            onClick={() => togglePlatformLlmMutation.mutate({ configId: item.id, is_active: !item.is_active })}
+                            type="button"
+                          >
+                            {item.is_active ? "Disable" : "Enable"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -470,22 +536,13 @@ export function SettingsPage() {
       <div className="grid grid--two">
         <div className="panel stack">
           <div>
-            <h3 className="panel-title">Add Platform-Managed LLM</h3>
+            <h3 className="panel-title">Add HermanScience LLM</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              These shared entries become the allowed pool when an organization selects platform-managed credentials in onboarding.
+              Create a shared HermanScience-provided model entry that organizations can select from the managed pool.
             </div>
           </div>
 
           <div className="field-row">
-            <div>
-              <label className="field-label" htmlFor="platform_llm_label">Label</label>
-              <input
-                className="field"
-                id="platform_llm_label"
-                value={platformLlmForm.label}
-                onChange={(event) => setPlatformLlmForm((current) => ({ ...current, label: event.target.value }))}
-              />
-            </div>
             <div>
               <label className="field-label" htmlFor="platform_llm_provider">Provider</label>
               <select
@@ -505,7 +562,7 @@ export function SettingsPage() {
 
           <div className="field-row">
             <div>
-              <label className="field-label" htmlFor="platform_llm_model">Model</label>
+              <label className="field-label" htmlFor="platform_llm_model">Model Name</label>
               <input
                 className="field"
                 id="platform_llm_model"
@@ -524,43 +581,18 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="field-row">
-            <div>
-              <label className="field-label" htmlFor="platform_llm_secret_selection">Secret Selection</label>
-              <select
-                className="field"
-                id="platform_llm_secret_selection"
-                value={platformLlmSecretSelection}
-                onChange={(event) => setPlatformLlmSecretSelection(event.target.value as SecretSelection)}
-              >
-                <option value="local_storage">Local Storage</option>
-                <option value="encrypted_vault">Encrypted Vault</option>
-              </select>
-            </div>
-            <div>
-              <label className="field-label" htmlFor="platform_llm_api_key">API Key</label>
-              <input
-                className="field"
-                id="platform_llm_api_key"
-                disabled={platformLlmSecretSelection === "encrypted_vault"}
-                placeholder={platformLlmSecretSelection === "encrypted_vault" ? "Retrieved from vault" : "Enter managed key"}
-                readOnly={platformLlmSecretSelection === "encrypted_vault"}
-                type={platformLlmSecretSelection === "local_storage" ? "password" : "text"}
-                value={platformLlmForm.api_key}
-                onChange={(event) => setPlatformLlmForm((current) => ({ ...current, api_key: event.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="field-label" htmlFor="platform_llm_secret_reference">Secret Vault</label>
-              <input
-                className="field"
-                id="platform_llm_secret_reference"
-                disabled={platformLlmSecretSelection === "local_storage"}
-                placeholder={platformLlmSecretSelection === "local_storage" ? "Defined internally" : "Enter vault reference"}
-                readOnly={platformLlmSecretSelection === "local_storage"}
-                value={platformLlmSecretSelection === "local_storage" ? "Defined internally" : platformLlmForm.secret_reference}
-                onChange={(event) => setPlatformLlmForm((current) => ({ ...current, secret_reference: event.target.value }))}
-              />
+          <div>
+            <label className="field-label" htmlFor="platform_llm_api_key">LLM Key</label>
+            <input
+              className="field"
+              id="platform_llm_api_key"
+              placeholder="Enter the HermanScience-managed key"
+              type="password"
+              value={platformLlmForm.api_key}
+              onChange={(event) => setPlatformLlmForm((current) => ({ ...current, api_key: event.target.value }))}
+            />
+            <div className="section-note">
+              The key is encrypted and stored server-side. It is never shown again after save.
             </div>
           </div>
 
@@ -595,12 +627,108 @@ export function SettingsPage() {
 
           <button
             className="primary-button"
-            disabled={!platformLlmForm.label.trim() || !platformLlmForm.model_name.trim()}
+            disabled={!platformLlmForm.model_name.trim()}
             onClick={() => createPlatformLlmMutation.mutate()}
             type="button"
           >
-            {createPlatformLlmMutation.isPending ? "Saving..." : "Add platform-managed LLM"}
+            {createPlatformLlmMutation.isPending ? "Saving..." : "Add HermanScience LLM"}
           </button>
+        </div>
+
+        <div className="panel stack">
+          <div>
+            <h3 className="panel-title">Configure HermanScience LLM</h3>
+            <div className="muted" style={{ marginTop: 8 }}>
+              Select a shared model from the pool above to update its URL or rotate its key. Model name and provider stay fixed after creation.
+            </div>
+          </div>
+
+          {selectedPlatformLlm ? (
+            <>
+              <div className="key-value">
+                <div className="muted">Model</div>
+                <div>{selectedPlatformLlm.model_name}</div>
+              </div>
+              <div className="key-value">
+                <div className="muted">Provider</div>
+                <div>{selectedPlatformLlm.provider_type}</div>
+              </div>
+              <div className="key-value">
+                <div className="muted">Stored key</div>
+                <div>{selectedPlatformLlm.api_key_masked ?? "No key saved"}</div>
+              </div>
+
+              <div>
+                <label className="field-label" htmlFor="platform_llm_edit_endpoint">Endpoint URL</label>
+                <input
+                  className="field"
+                  id="platform_llm_edit_endpoint"
+                  value={platformLlmEditForm.endpoint_url}
+                  onChange={(event) => setPlatformLlmEditForm((current) => ({ ...current, endpoint_url: event.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="field-label" htmlFor="platform_llm_edit_key">LLM Key</label>
+                <input
+                  className="field"
+                  id="platform_llm_edit_key"
+                  placeholder="Leave blank to keep the current key"
+                  type="password"
+                  value={platformLlmEditForm.api_key}
+                  onChange={(event) => setPlatformLlmEditForm((current) => ({ ...current, api_key: event.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="field-label" htmlFor="platform_llm_edit_notes">Notes</label>
+                <textarea
+                  className="field"
+                  id="platform_llm_edit_notes"
+                  rows={3}
+                  value={platformLlmEditForm.notes}
+                  onChange={(event) => setPlatformLlmEditForm((current) => ({ ...current, notes: event.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="field-label" htmlFor="platform_llm_edit_active">Availability</label>
+                <select
+                  className="field"
+                  id="platform_llm_edit_active"
+                  value={String(platformLlmEditForm.is_active)}
+                  onChange={(event) =>
+                    setPlatformLlmEditForm((current) => ({
+                      ...current,
+                      is_active: event.target.value === "true",
+                    }))
+                  }
+                >
+                  <option value="true">Available in pool</option>
+                  <option value="false">Saved but unavailable</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  className="primary-button"
+                  onClick={() => updatePlatformLlmMutation.mutate()}
+                  type="button"
+                >
+                  {updatePlatformLlmMutation.isPending ? "Saving..." : "Update HermanScience LLM"}
+                </button>
+                <button
+                  className="secondary-button secondary-button--danger"
+                  onClick={() => deletePlatformLlmMutation.mutate()}
+                  type="button"
+                >
+                  {deletePlatformLlmMutation.isPending ? "Deleting..." : "Delete LLM"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state table-empty-state">Select an LLM from the pool above to configure it.</div>
+          )}
         </div>
 
         <div className="panel stack">

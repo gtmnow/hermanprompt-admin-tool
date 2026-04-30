@@ -284,7 +284,8 @@ def table_exists(db: Session, table_name: str) -> bool:
     try:
         bind = db.get_bind()
         inspector = inspect(bind)
-        return bool(inspector.has_table(table_name, schema="public"))
+        schema = "public" if bind.dialect.name.startswith("postgres") else None
+        return bool(inspector.has_table(table_name, schema=schema))
     except Exception:
         return False
 
@@ -391,7 +392,8 @@ def column_exists(db: Session, table_name: str, column_name: str) -> bool:
     try:
         bind = db.get_bind()
         inspector = inspect(bind)
-        columns = inspector.get_columns(table_name, schema="public")
+        schema = "public" if bind.dialect.name.startswith("postgres") else None
+        columns = inspector.get_columns(table_name, schema=schema)
     except Exception:
         return False
     return any(column.get("name") == column_name for column in columns)
@@ -649,6 +651,37 @@ def ensure_additive_schema_extensions() -> None:
             if "platform_managed_config_id" not in existing_columns:
                 connection.execute(text("ALTER TABLE tenant_llm_config ADD COLUMN platform_managed_config_id VARCHAR(36)"))
 
+        if "auth_users" in existing_tables and "tenants" in existing_tables:
+            legacy_auth_tenant_rows = connection.execute(
+                text(
+                    """
+                    SELECT
+                      a.id AS auth_user_id,
+                      t.id AS tenant_id
+                    FROM auth_users a
+                    JOIN tenants t
+                      ON (t.external_customer_id IS NOT NULL AND t.external_customer_id = a.tenant_id)
+                      OR t.tenant_key = a.tenant_id
+                    WHERE a.tenant_id <> t.id
+                    """
+                )
+            ).mappings().all()
+            for row in legacy_auth_tenant_rows:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE auth_users
+                        SET tenant_id = :tenant_id,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :auth_user_id
+                        """
+                    ),
+                    {
+                        "auth_user_id": row["auth_user_id"],
+                        "tenant_id": row["tenant_id"],
+                    },
+                )
+
         existing_tiers = {
             (row["scope_type"], row["tier_key"]): row["id"]
             for row in connection.execute(
@@ -863,7 +896,7 @@ def auth_tenant_candidates(tenant: Tenant) -> list[str]:
 
 
 def preferred_auth_tenant_id(tenant: Tenant) -> str:
-    return tenant.external_customer_id or tenant.id or tenant.tenant_key
+    return str(tenant.id)
 
 
 def resolve_snapshot_tenant_id(db: Session, tenant: Tenant | None = None) -> str | None:

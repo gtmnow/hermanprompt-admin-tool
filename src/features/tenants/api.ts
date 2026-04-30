@@ -225,6 +225,9 @@ export const tenantApi = {
   updatePlatformManagedLlm(configId: string, payload: Record<string, unknown>) {
     return api.patchResource<PlatformManagedLlmConfig>(`/settings/platform-managed-llms/${configId}`, payload);
   },
+  deletePlatformManagedLlm(configId: string) {
+    return api.deleteResource<PlatformManagedLlmConfig>(`/settings/platform-managed-llms/${configId}`);
+  },
   createDatabaseInstance(payload: Record<string, unknown>) {
     return api.postResource<DatabaseInstanceConfig>("/settings/database-instances", payload);
   },

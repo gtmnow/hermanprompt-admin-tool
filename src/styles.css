@@ -444,6 +444,35 @@ button {
     0 4px 10px rgba(15, 23, 42, 0.08);
 }
 
+.secondary-button--danger {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.2);
+}
+
+.secondary-button--danger:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(254, 226, 226, 1) 100%);
+  border-color: rgba(185, 28, 28, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 12px 22px rgba(185, 28, 28, 0.14);
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-dark);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+
+.link-button:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .activation-action-button {
   min-width: 132px;
   padding: 14px 24px;
@@ -982,17 +1011,6 @@ button {
   border-radius: 8px;
 }
 
-.users-page__primary-toggle {
-  align-self: end;
-}
-
-.users-page__primary-toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 44px;
-}
-
 .users-page__dialog-save-row {
   justify-content: flex-start;
 }
@@ -1178,10 +1196,6 @@ button {
   .users-page__detail-grid,
   .users-page__detail-field {
     grid-template-columns: 1fr;
-  }
-
-  .users-page__primary-toggle {
-    align-self: auto;
   }
 
   .topbar {

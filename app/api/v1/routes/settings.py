@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import DatabaseInstanceConfig, PlatformManagedLlmConfig, PromptUiInstanceConfig, ResellerPartner, ResellerTenantDefaults, ServiceTierDefinition, Tenant
+from app.models import DatabaseInstanceConfig, PlatformManagedLlmConfig, PromptUiInstanceConfig, ResellerPartner, ResellerTenantDefaults, ServiceTierDefinition, Tenant, TenantLLMConfig
 from app.schemas import (
     DatabaseInstanceConfigCreate,
     DatabaseInstanceConfigSummary,
@@ -343,6 +343,46 @@ def update_platform_managed_llm(
     db.commit()
     db.refresh(record)
     return ResourceEnvelope[PlatformManagedLlmConfigSummary](resource=to_platform_llm_summary(record), updated_at=record.updated_at)
+
+
+@router.delete("/platform-managed-llms/{config_id}", response_model=ResourceEnvelope[PlatformManagedLlmConfigSummary])
+def delete_platform_managed_llm(
+    config_id: str,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[PlatformManagedLlmConfigSummary]:
+    ensure_additive_schema_extensions()
+    record = db.get(PlatformManagedLlmConfig, config_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Platform managed LLM config not found")
+
+    tenant_reference_count = int(
+        db.scalar(
+            select(func.count()).select_from(TenantLLMConfig).where(TenantLLMConfig.platform_managed_config_id == config_id)
+        )
+        or 0
+    )
+    if tenant_reference_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This HermanScience LLM is still assigned to one or more organizations",
+        )
+
+    before = serialize_model(record)
+    summary = to_platform_llm_summary(record)
+    db.delete(record)
+    write_audit_log(
+        db,
+        principal,
+        action_type="settings.platform_managed_llm.delete",
+        target_type="platform_managed_llm_config",
+        target_id=config_id,
+        before=before,
+        request_id=request_id,
+    )
+    db.commit()
+    return ResourceEnvelope[PlatformManagedLlmConfigSummary](resource=summary, updated_at=summary.updated_at)
 
 
 @router.get("/database-instances", response_model=ListEnvelope[DatabaseInstanceConfigSummary])

@@ -15,7 +15,14 @@ class Settings(BaseSettings):
     default_page_size: int = Field(default=25, ge=1, le=250)
     max_page_size: int = Field(default=100, ge=1, le=500)
     secret_vault_provider: str = "database_encrypted"
-    secret_vault_master_key: str | None = None
+    secret_vault_master_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "HERMAN_SHARED_SECRET_VAULT_MASTER_KEY",
+            "HERMAN_RUNTIME_SECRET_VAULT_MASTER_KEY",
+            "HERMAN_ADMIN_SECRET_VAULT_MASTER_KEY",
+        ),
+    )
     secret_vault_local_key_path: str = "./data/.secret_vault.key"
     azure_key_vault_url: str | None = None
     resend_api_key: str | None = None
