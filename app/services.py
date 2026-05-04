@@ -1897,6 +1897,13 @@ def delete_tenant_and_users(db: Session, tenant: Tenant) -> list[str]:
             ),
             {"user_ids": all_user_ids},
         )
+    if all_user_ids and has_auth_user_credentials_table(db):
+        db.execute(
+            text("delete from auth_user_credentials where user_id_hash in :user_ids").bindparams(
+                bindparam("user_ids", expanding=True)
+            ),
+            {"user_ids": all_user_ids},
+        )
     if tenant_candidates and table_exists(db, "auth_users"):
         db.execute(
             text("delete from auth_users where tenant_id in :tenant_candidates").bindparams(
