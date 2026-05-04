@@ -13,6 +13,8 @@ import type {
   ReportExportPayload,
   ReportRunPayload,
   ReportScopeType,
+  ResellerLifecycleAction,
+  ResellerLifecycleActionResult,
   ResellerPartner,
   ResellerTenantDefaults,
   ReportSummary,
@@ -39,6 +41,9 @@ export const tenantApi = {
   },
   updateReseller(resellerId: string, payload: Record<string, unknown>) {
     return api.patchResource<ResellerPartner>(`/resellers/${resellerId}`, payload);
+  },
+  runResellerAction(resellerId: string, action: ResellerLifecycleAction) {
+    return api.postResource<ResellerLifecycleActionResult>(`/resellers/${resellerId}/actions`, { action });
   },
   getResellerDefaults(resellerId: string) {
     return api.getResource<ResellerTenantDefaults>(`/resellers/${resellerId}/tenant-defaults`);

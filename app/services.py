@@ -479,6 +479,257 @@ def generate_reseller_key(db: Session, reseller_name: str, *, exclude_reseller_i
         suffix += 1
 
 
+def get_reseller_impact_counts(db: Session, reseller: ResellerPartner) -> dict[str, int]:
+    organization_count = int(
+        db.scalar(
+            select(func.count()).select_from(Tenant).where(Tenant.reseller_partner_id == reseller.id)
+        )
+        or 0
+    )
+    total_user_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(UserTenantMembership)
+            .join(Tenant, Tenant.id == UserTenantMembership.tenant_id)
+            .where(
+                Tenant.reseller_partner_id == reseller.id,
+                UserTenantMembership.status != "deleted",
+            )
+        )
+        or 0
+    )
+    partner_admin_count = int(
+        db.scalar(
+            select(func.count(func.distinct(AdminScope.admin_user_id)))
+            .select_from(AdminScope)
+            .where(AdminScope.reseller_partner_id == reseller.id)
+        )
+        or 0
+    )
+    return {
+        "organization_count": organization_count,
+        "total_user_count": total_user_count,
+        "partner_admin_count": partner_admin_count,
+    }
+
+
+def reseller_admin_user_ids(db: Session, reseller_id: str) -> list[str]:
+    return [
+        str(admin_user_id)
+        for admin_user_id in db.scalars(
+            select(AdminScope.admin_user_id)
+            .where(AdminScope.reseller_partner_id == reseller_id)
+            .distinct()
+        )
+    ]
+
+
+def revoke_admin_sessions_for_users(db: Session, admin_user_ids: list[str]) -> None:
+    if not admin_user_ids:
+        return
+    now = utc_now()
+    db.execute(
+        text(
+            """
+            update admin_sessions
+            set revoked_at = :revoked_at
+            where admin_user_id in :admin_user_ids
+              and revoked_at is null
+            """
+        ).bindparams(bindparam("admin_user_ids", expanding=True)),
+        {"revoked_at": now, "admin_user_ids": admin_user_ids},
+    )
+
+
+def set_admin_users_active(db: Session, admin_user_ids: list[str], *, is_active: bool) -> None:
+    if not admin_user_ids:
+        return
+    now = utc_now()
+    db.execute(
+        text(
+            """
+            update admin_users
+            set
+              is_active = :is_active,
+              updated_at = :updated_at
+            where id in :admin_user_ids
+            """
+        ).bindparams(bindparam("admin_user_ids", expanding=True)),
+        {
+            "is_active": is_active,
+            "updated_at": now,
+            "admin_user_ids": admin_user_ids,
+        },
+    )
+    if not is_active:
+        revoke_admin_sessions_for_users(db, admin_user_ids)
+
+
+def auth_user_snapshot_by_user_id(db: Session, user_id_hash: str) -> dict[str, object] | None:
+    auth_row = db.execute(
+        text("select * from auth_users where user_id_hash = :user_id_hash order by id desc limit 1"),
+        {"user_id_hash": user_id_hash},
+    ).mappings().first()
+    if auth_row is None:
+        return None
+
+    credential_row = None
+    if has_auth_user_credentials_table(db):
+        credential_row = db.execute(
+            text("select * from auth_user_credentials where user_id_hash = :user_id_hash"),
+            {"user_id_hash": user_id_hash},
+        ).mappings().first()
+
+    snapshot: dict[str, object] = {
+        "auth_user": {
+            "tenant_id": auth_row.get("tenant_id"),
+            "is_active": bool(auth_row.get("is_active")),
+        }
+    }
+    if auth_users_has_legacy_password_columns(db):
+        snapshot["auth_user"]["password_hash"] = auth_row.get("password_hash")
+        snapshot["auth_user"]["password_changed_at"] = (
+            auth_row.get("password_changed_at").isoformat() if auth_row.get("password_changed_at") else None
+        )
+    if credential_row is not None:
+        snapshot["auth_user_credentials"] = {
+            "password_hash": credential_row.get("password_hash"),
+            "password_algorithm": credential_row.get("password_algorithm"),
+            "password_set_at": credential_row.get("password_set_at").isoformat() if credential_row.get("password_set_at") else None,
+            "failed_login_attempts": credential_row.get("failed_login_attempts"),
+            "locked_until": credential_row.get("locked_until").isoformat() if credential_row.get("locked_until") else None,
+            "last_login_at": credential_row.get("last_login_at").isoformat() if credential_row.get("last_login_at") else None,
+        }
+    return snapshot
+
+
+def build_reseller_lifecycle_snapshot(db: Session, reseller: ResellerPartner) -> dict[str, object]:
+    tenant_snapshots: list[dict[str, object]] = []
+    seen_user_ids: set[str] = set()
+    user_snapshots: list[dict[str, object]] = []
+
+    for tenant in db.scalars(
+        select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc())
+    ):
+        tenant_snapshots.append({"tenant_id": tenant.id, "status": tenant.status})
+        for membership in db.scalars(
+            select(UserTenantMembership).where(UserTenantMembership.tenant_id == tenant.id)
+        ):
+            membership_snapshot: dict[str, object] = {
+                "user_id_hash": membership.user_id_hash,
+                "tenant_id": membership.tenant_id,
+                "status": membership.status,
+            }
+            if membership.user_id_hash not in seen_user_ids:
+                seen_user_ids.add(membership.user_id_hash)
+                auth_snapshot = auth_user_snapshot_by_user_id(db, membership.user_id_hash)
+                if auth_snapshot is not None:
+                    membership_snapshot["auth_state"] = auth_snapshot
+            user_snapshots.append(membership_snapshot)
+
+    admin_snapshots = []
+    for admin_id in reseller_admin_user_ids(db, reseller.id):
+        admin = db.get(AdminUser, admin_id)
+        if admin is not None:
+            admin_snapshots.append({"admin_user_id": admin.id, "is_active": admin.is_active})
+
+    return {
+        "partner_is_active": reseller.is_active,
+        "tenants": tenant_snapshots,
+        "users": user_snapshots,
+        "partner_admins": admin_snapshots,
+    }
+
+
+def restore_user_auth_snapshot(db: Session, user_id_hash: str, auth_state: dict[str, object] | None) -> None:
+    if not auth_state:
+        return
+    auth_user = auth_state.get("auth_user")
+    if isinstance(auth_user, dict):
+        now = datetime.utcnow()
+        update_fields = {
+            "tenant_id": auth_user.get("tenant_id"),
+            "is_active": bool(auth_user.get("is_active")),
+            "updated_at": now,
+            "user_id_hash": user_id_hash,
+        }
+        if auth_users_has_legacy_password_columns(db):
+            update_fields["password_hash"] = auth_user.get("password_hash")
+            update_fields["password_changed_at"] = auth_user.get("password_changed_at")
+            db.execute(
+                text(
+                    """
+                    update auth_users
+                    set
+                      tenant_id = :tenant_id,
+                      is_active = :is_active,
+                      password_hash = :password_hash,
+                      password_changed_at = :password_changed_at,
+                      updated_at = :updated_at
+                    where user_id_hash = :user_id_hash
+                    """
+                ),
+                update_fields,
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    update auth_users
+                    set
+                      tenant_id = :tenant_id,
+                      is_active = :is_active,
+                      updated_at = :updated_at
+                    where user_id_hash = :user_id_hash
+                    """
+                ),
+                update_fields,
+            )
+
+    credential_state = auth_state.get("auth_user_credentials")
+    if isinstance(credential_state, dict) and has_auth_user_credentials_table(db):
+        db.execute(
+            text(
+                """
+                insert into auth_user_credentials (
+                  user_id_hash,
+                  password_hash,
+                  password_algorithm,
+                  password_set_at,
+                  failed_login_attempts,
+                  locked_until,
+                  last_login_at
+                ) values (
+                  :user_id_hash,
+                  :password_hash,
+                  :password_algorithm,
+                  :password_set_at,
+                  :failed_login_attempts,
+                  :locked_until,
+                  :last_login_at
+                )
+                on conflict (user_id_hash) do update
+                set
+                  password_hash = excluded.password_hash,
+                  password_algorithm = excluded.password_algorithm,
+                  password_set_at = excluded.password_set_at,
+                  failed_login_attempts = excluded.failed_login_attempts,
+                  locked_until = excluded.locked_until,
+                  last_login_at = excluded.last_login_at
+                """
+            ),
+            {
+                "user_id_hash": user_id_hash,
+                "password_hash": credential_state.get("password_hash"),
+                "password_algorithm": credential_state.get("password_algorithm"),
+                "password_set_at": credential_state.get("password_set_at"),
+                "failed_login_attempts": credential_state.get("failed_login_attempts"),
+                "locked_until": credential_state.get("locked_until"),
+                "last_login_at": credential_state.get("last_login_at"),
+            },
+        )
+
+
 def ensure_additive_schema_extensions() -> None:
     with engine.begin() as connection:
         inspector = inspect(connection)
@@ -504,6 +755,8 @@ def ensure_additive_schema_extensions() -> None:
             reseller_columns = {column["name"] for column in inspector.get_columns("reseller_partners")}
             if "service_tier_definition_id" not in reseller_columns:
                 connection.execute(text("ALTER TABLE reseller_partners ADD COLUMN service_tier_definition_id VARCHAR(36)"))
+            if "lifecycle_snapshot_json" not in reseller_columns:
+                connection.execute(text("ALTER TABLE reseller_partners ADD COLUMN lifecycle_snapshot_json TEXT"))
 
         if "tenants" in existing_tables:
             tenant_columns = {column["name"] for column in inspector.get_columns("tenants")}
@@ -1772,6 +2025,161 @@ def inactivate_tenant_state(db: Session, tenant: Tenant) -> list[str]:
     user_ids = disable_tenant_user_logins(db, tenant)
     tenant.status = "inactive"
     return user_ids
+
+
+def activate_tenant_state(db: Session, tenant: Tenant) -> list[str]:
+    tenant_candidates = auth_tenant_candidates(tenant)
+    user_ids = [
+        str(user_id)
+        for user_id in db.scalars(
+            select(UserTenantMembership.user_id_hash).where(
+                UserTenantMembership.tenant_id == tenant.id,
+                UserTenantMembership.status != "deleted",
+            )
+        )
+    ]
+    now = datetime.utcnow()
+    if tenant_candidates and table_exists(db, "auth_users"):
+        db.execute(
+            text(
+                """
+                update auth_users
+                set
+                  is_active = true,
+                  updated_at = :updated_at
+                where tenant_id in :tenant_candidates
+                """
+            ).bindparams(bindparam("tenant_candidates", expanding=True)),
+            {
+                "updated_at": now,
+                "tenant_candidates": tenant_candidates,
+            },
+        )
+    db.execute(
+        text(
+            """
+            update user_tenant_membership
+            set
+              status = 'active',
+              updated_at = :updated_at
+            where tenant_id = :tenant_id
+              and status != 'deleted'
+            """
+        ),
+        {"tenant_id": tenant.id, "updated_at": now},
+    )
+    tenant.status = "active"
+    return user_ids
+
+
+def inactivate_reseller_state(db: Session, reseller: ResellerPartner) -> dict[str, int]:
+    counts = get_reseller_impact_counts(db, reseller)
+    if reseller.lifecycle_snapshot_json:
+        reseller.is_active = False
+        return counts
+    reseller.lifecycle_snapshot_json = json.dumps(build_reseller_lifecycle_snapshot(db, reseller), sort_keys=True)
+    admin_user_ids = reseller_admin_user_ids(db, reseller.id)
+    set_admin_users_active(db, admin_user_ids, is_active=False)
+    for tenant in db.scalars(
+        select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc())
+    ):
+        inactivate_tenant_state(db, tenant)
+        refresh_onboarding_state(db, tenant.id)
+    reseller.is_active = False
+    return counts
+
+
+def activate_reseller_state(db: Session, reseller: ResellerPartner) -> dict[str, int]:
+    counts = get_reseller_impact_counts(db, reseller)
+    snapshot = json.loads(reseller.lifecycle_snapshot_json) if reseller.lifecycle_snapshot_json else None
+    if not isinstance(snapshot, dict):
+        admin_user_ids = reseller_admin_user_ids(db, reseller.id)
+        set_admin_users_active(db, admin_user_ids, is_active=True)
+        for tenant in db.scalars(
+            select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc())
+        ):
+            activate_tenant_state(db, tenant)
+            refresh_onboarding_state(db, tenant.id)
+        reseller.is_active = True
+        return counts
+
+    for admin_state in snapshot.get("partner_admins", []):
+        if not isinstance(admin_state, dict):
+            continue
+        admin = db.get(AdminUser, admin_state.get("admin_user_id"))
+        if admin is not None:
+            admin.is_active = bool(admin_state.get("is_active"))
+
+    for tenant_state in snapshot.get("tenants", []):
+        if not isinstance(tenant_state, dict):
+            continue
+        tenant = db.get(Tenant, tenant_state.get("tenant_id"))
+        if tenant is not None:
+            tenant.status = str(tenant_state.get("status") or tenant.status)
+
+    for user_state in snapshot.get("users", []):
+        if not isinstance(user_state, dict):
+            continue
+        membership = db.scalar(
+            select(UserTenantMembership).where(
+                UserTenantMembership.user_id_hash == user_state.get("user_id_hash"),
+                UserTenantMembership.tenant_id == user_state.get("tenant_id"),
+            )
+        )
+        if membership is not None and user_state.get("status"):
+            membership.status = str(user_state["status"])
+        restore_user_auth_snapshot(
+            db,
+            str(user_state.get("user_id_hash")),
+            user_state.get("auth_state") if isinstance(user_state.get("auth_state"), dict) else None,
+        )
+
+    for tenant in db.scalars(
+        select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc())
+    ):
+        refresh_onboarding_state(db, tenant.id)
+    reseller.is_active = bool(snapshot.get("partner_is_active", True))
+    reseller.lifecycle_snapshot_json = None
+    return counts
+
+
+def delete_reseller_and_tenants(db: Session, reseller: ResellerPartner) -> dict[str, int]:
+    if reseller.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Partner must be inactive before deletion")
+
+    counts = get_reseller_impact_counts(db, reseller)
+    admin_user_ids = reseller_admin_user_ids(db, reseller.id)
+
+    for tenant in list(
+        db.scalars(select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc()))
+    ):
+        delete_tenant_and_users(db, tenant)
+
+    if admin_user_ids:
+        revoke_admin_sessions_for_users(db, admin_user_ids)
+        db.execute(delete(AdminScope).where(AdminScope.reseller_partner_id == reseller.id))
+        set_admin_users_active(db, admin_user_ids, is_active=False)
+
+    for admin_id in admin_user_ids:
+        admin = db.get(AdminUser, admin_id)
+        if admin is None:
+            continue
+        remaining_scope_count = db.scalar(
+            select(func.count()).select_from(AdminScope).where(AdminScope.admin_user_id == admin.id)
+        ) or 0
+        if remaining_scope_count == 0:
+            admin.is_active = False
+
+    db.execute(
+        delete(ReportExportJob).where(
+            ReportExportJob.scope_type == "reseller",
+            ReportExportJob.scope_id == reseller.id,
+        )
+    )
+    if reseller.tenant_defaults is not None:
+        db.delete(reseller.tenant_defaults)
+    db.delete(reseller)
+    return counts
 
 
 def delete_tenant_and_users(db: Session, tenant: Tenant) -> list[str]:

@@ -30,6 +30,7 @@ class ResellerPartner(TimestampMixin, Base):
     reseller_name: Mapped[str] = mapped_column(String(200))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     service_tier_definition_id: Mapped[str | None] = mapped_column(ForeignKey("service_tier_definitions.id"), index=True)
+    lifecycle_snapshot_json: Mapped[str | None] = mapped_column(Text)
 
     tenants: Mapped[list["Tenant"]] = relationship(back_populates="reseller_partner")
     tenant_defaults: Mapped["ResellerTenantDefaults | None"] = relationship(back_populates="reseller_partner", uselist=False)

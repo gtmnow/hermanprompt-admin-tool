@@ -7,7 +7,7 @@ import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
 import { titleCase } from "../../lib/format";
-import type { ResellerTenantDefaults } from "../../lib/types";
+import type { ResellerLifecycleAction, ResellerTenantDefaults } from "../../lib/types";
 
 const emptyDefaults: Omit<ResellerTenantDefaults, "id" | "reseller_partner_id" | "created_at" | "updated_at"> = {
   default_plan_tier: "",
@@ -94,6 +94,31 @@ function mutationMessage(error: unknown) {
   return "Something went wrong while saving this change.";
 }
 
+function lifecycleActionLabel(action: ResellerLifecycleAction) {
+  switch (action) {
+    case "activate":
+      return "Activate Partner";
+    case "inactivate":
+      return "Inactivate Partner";
+    default:
+      return "Delete Partner";
+  }
+}
+
+function lifecycleActionDescription(action: ResellerLifecycleAction, partnerName: string, counts: {
+  organizationCount: number;
+  userCount: number;
+  adminCount: number;
+}) {
+  if (action === "activate") {
+    return `This will reactivate ${partnerName}, ${counts.adminCount} partner admin login(s), ${counts.organizationCount} organization(s), and ${counts.userCount} user account(s).`;
+  }
+  if (action === "inactivate") {
+    return `This will disable ${partnerName}, ${counts.adminCount} partner admin login(s), ${counts.organizationCount} organization(s), and ${counts.userCount} user account(s) from accessing Herman applications. Records will remain in the database.`;
+  }
+  return `This will permanently delete inactive partner ${partnerName} and also delete ${counts.organizationCount} owned organization(s) and ${counts.userCount} related user account(s).`;
+}
+
 export function ResellersPage() {
   const queryClient = useQueryClient();
   const [selectedResellerId, setSelectedResellerId] = useState("");
@@ -109,6 +134,8 @@ export function ResellersPage() {
     email: "",
   });
   const [adminPreset, setAdminPreset] = useState<ResellerAdminPresetKey>("autonomous");
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [pendingLifecycleAction, setPendingLifecycleAction] = useState<ResellerLifecycleAction | null>(null);
 
   const resellersQuery = useQuery({
     queryKey: ["resellers"],
@@ -193,10 +220,14 @@ export function ResellersPage() {
         is_active: true,
         service_tier_definition_id: createForm.service_tier_definition_id || null,
       }),
+    onMutate: async () => {
+      setSuccessMessage(null);
+    },
     onSuccess: async (result) => {
       setCreateForm({ reseller_name: "", service_tier_definition_id: "" });
       await queryClient.invalidateQueries({ queryKey: ["resellers"] });
       setSelectedResellerId(result.resource.id);
+      setSuccessMessage("Partner created. Next, create a partner admin and assign organizations.");
     },
   });
 
@@ -211,6 +242,7 @@ export function ResellersPage() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["resellers"] });
+      setSuccessMessage("Partner tier updated.");
     },
   });
 
@@ -227,6 +259,7 @@ export function ResellersPage() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["reseller-defaults", selectedResellerId] });
+      setSuccessMessage("Partner defaults updated.");
     },
   });
 
@@ -248,6 +281,33 @@ export function ResellersPage() {
       setAdminForm({ user_id_hash: "", display_name: "", email: "" });
       setAdminPreset("autonomous");
       await queryClient.invalidateQueries({ queryKey: ["admins"] });
+      await queryClient.invalidateQueries({ queryKey: ["resellers"] });
+      setSuccessMessage("Partner admin created.");
+    },
+  });
+
+  const runResellerActionMutation = useMutation({
+    mutationFn: (action: ResellerLifecycleAction) => {
+      if (!selectedResellerId) {
+        throw new Error("Select a partner first.");
+      }
+      return tenantApi.runResellerAction(selectedResellerId, action);
+    },
+    onMutate: async () => {
+      setSuccessMessage(null);
+    },
+    onSuccess: async (result, action) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["resellers"] }),
+        queryClient.invalidateQueries({ queryKey: ["tenants"] }),
+        queryClient.invalidateQueries({ queryKey: ["admins"] }),
+        queryClient.invalidateQueries({ queryKey: ["onboarding"] }),
+      ]);
+      setPendingLifecycleAction(null);
+      setSuccessMessage(result.resource.message);
+      if (action === "delete") {
+        setSelectedResellerId("");
+      }
     },
   });
 
@@ -257,7 +317,9 @@ export function ResellersPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["tenants"] }),
         queryClient.invalidateQueries({ queryKey: ["onboarding"] }),
+        queryClient.invalidateQueries({ queryKey: ["resellers"] }),
       ]);
+      setSuccessMessage("Organization assigned to partner.");
     },
   });
 
@@ -267,7 +329,9 @@ export function ResellersPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["tenants"] }),
         queryClient.invalidateQueries({ queryKey: ["onboarding"] }),
+        queryClient.invalidateQueries({ queryKey: ["resellers"] }),
       ]);
+      setSuccessMessage("Organization removed from partner.");
     },
   });
 
@@ -316,6 +380,13 @@ export function ResellersPage() {
   });
   const unhealthyTenants = portfolioHealthRows.filter((item) => item.issueSummary !== "Healthy");
   const tenantNameByResellerId = new Map(resellers.map((reseller) => [reseller.id, reseller.reseller_name]));
+  const lifecycleCounts = selectedReseller
+    ? {
+        organizationCount: selectedReseller.organization_count,
+        userCount: selectedReseller.total_user_count,
+        adminCount: selectedReseller.partner_admin_count,
+      }
+    : { organizationCount: 0, userCount: 0, adminCount: 0 };
 
   return (
     <div className="stack">
@@ -325,6 +396,51 @@ export function ResellersPage() {
           <p className="page-subtitle">
             Create partners, define their portfolio scope, assign partner admins, and seed tenant defaults without changing shared cross-system tables.
           </p>
+        </div>
+      </div>
+
+      <div className="panel stack">
+        <CardHelpTooltip text="Lists every partner in the database with current status, managed organization count, total users across owned organizations, and partner admin coverage." />
+        <div>
+          <h3 className="panel-title">Partner Inventory</h3>
+          <div className="muted" style={{ marginTop: 8 }}>
+            Review the full partner portfolio, select a partner for lifecycle management, and compare ownership size at a glance.
+          </div>
+        </div>
+
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Partner</th>
+                <th>Status</th>
+                <th>Organizations</th>
+                <th>Total Users</th>
+                <th>Partner Admins</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resellers.map((reseller) => (
+                <tr
+                  key={reseller.id}
+                  style={{
+                    cursor: "pointer",
+                    background: reseller.id === selectedResellerId ? "rgba(15, 23, 42, 0.04)" : undefined,
+                  }}
+                  onClick={() => setSelectedResellerId(reseller.id)}
+                >
+                  <td>
+                    <strong>{reseller.reseller_name}</strong>
+                    <div className="muted">{reseller.reseller_key}</div>
+                  </td>
+                  <td><StatusBadge value={reseller.is_active ? "active" : "inactive"} /></td>
+                  <td>{reseller.organization_count}</td>
+                  <td>{reseller.total_user_count}</td>
+                  <td>{reseller.partner_admin_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -341,6 +457,7 @@ export function ResellersPage() {
           {createResellerMutation.error ? (
             <div className="section-note section-note--danger">{mutationMessage(createResellerMutation.error)}</div>
           ) : null}
+          {successMessage ? <div className="section-note section-note--success">{successMessage}</div> : null}
 
           <div>
             <label className="field-label" htmlFor="reseller_name">Partner Name</label>
@@ -377,33 +494,8 @@ export function ResellersPage() {
           >
             {createResellerMutation.isPending ? "Creating..." : "Create partner"}
           </button>
-
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Partner</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resellers.map((reseller) => (
-                  <tr
-                    key={reseller.id}
-                    style={{ cursor: "pointer" }}
-                    onClick={() => setSelectedResellerId(reseller.id)}
-                  >
-                    <td>
-                      <strong>{reseller.reseller_name}</strong>
-                      <div className="muted">{reseller.reseller_key}</div>
-                    </td>
-                    <td>
-                      <StatusBadge value={reseller.is_active ? "active" : "inactive"} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="section-note">
+            Creating a partner opens the workspace on the right so you can add the partner admin and assign organizations immediately.
           </div>
         </div>
 
@@ -420,6 +512,12 @@ export function ResellersPage() {
                   <div className="muted">{selectedReseller.service_tier?.tier_name ?? "No partner tier assigned"}</div>
                 </div>
                 <StatusBadge value={selectedReseller.is_active ? "active" : "inactive"} />
+              </div>
+
+              <div className={`section-note${selectedReseller.is_active ? "" : " section-note--danger"}`}>
+                {selectedReseller.is_active
+                  ? "This partner is active. Inactivation will disable partner admins and all owned organization/user access."
+                  : "This partner is inactive. You can reactivate it to restore access, or delete it to remove the inactive partner and its owned organizations."}
               </div>
 
               <div className="field-row">
@@ -472,6 +570,38 @@ export function ResellersPage() {
                   <div className="metric-card__trend">Inactive or misconfigured portfolio tenants</div>
                 </div>
               </div>
+
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                {selectedReseller.is_active ? (
+                  <button
+                    className="ghost-button"
+                    disabled={runResellerActionMutation.isPending}
+                    onClick={() => setPendingLifecycleAction("inactivate")}
+                    type="button"
+                  >
+                    Inactivate Partner
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className="secondary-button"
+                      disabled={runResellerActionMutation.isPending}
+                      onClick={() => setPendingLifecycleAction("activate")}
+                      type="button"
+                    >
+                      Activate Partner
+                    </button>
+                    <button
+                      className="ghost-button"
+                      disabled={runResellerActionMutation.isPending}
+                      onClick={() => setPendingLifecycleAction("delete")}
+                      type="button"
+                    >
+                      Delete Partner
+                    </button>
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -515,7 +645,7 @@ export function ResellersPage() {
                         <td>
                           <button
                             className="ghost-button"
-                            disabled={unassignTenantMutation.isPending}
+                            disabled={unassignTenantMutation.isPending || !selectedReseller?.is_active}
                             onClick={() => unassignTenantMutation.mutate(tenant.tenant.id)}
                             type="button"
                           >
@@ -556,7 +686,7 @@ export function ResellersPage() {
                         <td>
                           <button
                             className="secondary-button"
-                            disabled={assignTenantMutation.isPending}
+                            disabled={assignTenantMutation.isPending || !selectedReseller?.is_active}
                             onClick={() => assignTenantMutation.mutate(tenant.tenant.id)}
                             type="button"
                           >
@@ -599,7 +729,7 @@ export function ResellersPage() {
                         <td>
                           <button
                             className="secondary-button"
-                            disabled={assignTenantMutation.isPending}
+                            disabled={assignTenantMutation.isPending || !selectedReseller?.is_active}
                             onClick={() => assignTenantMutation.mutate(tenant.tenant.id)}
                             type="button"
                           >
@@ -706,7 +836,7 @@ export function ResellersPage() {
 
             <button
               className="primary-button"
-              disabled={!adminForm.email.trim() && !adminForm.display_name.trim()}
+              disabled={(!adminForm.email.trim() && !adminForm.display_name.trim()) || !selectedReseller?.is_active}
               onClick={() => createAdminMutation.mutate()}
               type="button"
             >
@@ -1044,6 +1174,57 @@ export function ResellersPage() {
           <button className="primary-button" onClick={() => saveDefaultsMutation.mutate()} type="button">
             {saveDefaultsMutation.isPending ? "Saving..." : "Save partner defaults"}
           </button>
+        </div>
+      ) : null}
+
+      {selectedReseller && pendingLifecycleAction ? (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setPendingLifecycleAction(null)}>
+          <div
+            className="dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="partner-lifecycle-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <CardHelpTooltip text="Confirms the selected partner lifecycle action and summarizes how many partner admins, organizations, and users will be affected." />
+            <div className="split-header">
+              <div>
+                <h3 className="panel-title" id="partner-lifecycle-dialog-title">{lifecycleActionLabel(pendingLifecycleAction)}</h3>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  {lifecycleActionDescription(pendingLifecycleAction, selectedReseller.reseller_name, lifecycleCounts)}
+                </div>
+              </div>
+            </div>
+
+            <div className={`section-note${pendingLifecycleAction !== "activate" ? " section-note--danger" : ""}`} style={{ marginTop: 18 }}>
+              Impacted partner admins: {lifecycleCounts.adminCount}. Impacted organizations: {lifecycleCounts.organizationCount}. Impacted users: {lifecycleCounts.userCount}.
+            </div>
+
+            {runResellerActionMutation.error ? (
+              <div className="section-note section-note--danger" style={{ marginTop: 14 }}>
+                {mutationMessage(runResellerActionMutation.error)}
+              </div>
+            ) : null}
+
+            <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
+              <button
+                className={pendingLifecycleAction === "activate" ? "primary-button" : "ghost-button"}
+                disabled={runResellerActionMutation.isPending}
+                onClick={() => runResellerActionMutation.mutate(pendingLifecycleAction)}
+                type="button"
+              >
+                {runResellerActionMutation.isPending ? "Working..." : lifecycleActionLabel(pendingLifecycleAction)}
+              </button>
+              <button
+                className="secondary-button"
+                disabled={runResellerActionMutation.isPending}
+                onClick={() => setPendingLifecycleAction(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

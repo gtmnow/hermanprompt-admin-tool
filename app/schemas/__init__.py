@@ -38,6 +38,8 @@ from app.schemas.service_tiers import (
     ServiceTierDefinitionUpdate,
 )
 from app.schemas.resellers import (
+    ResellerLifecycleActionRequest,
+    ResellerLifecycleActionResult,
     ResellerPartner,
     ResellerPartnerCreate,
     ResellerPartnerUpdate,
@@ -105,6 +107,8 @@ __all__ = [
     "ReportFilterSet",
     "ReportRunRequest",
     "ReportSummary",
+    "ResellerLifecycleActionRequest",
+    "ResellerLifecycleActionResult",
     "ResellerPartner",
     "ResellerPartnerCreate",
     "ResellerPartnerUpdate",

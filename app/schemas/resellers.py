@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -23,13 +24,34 @@ class ResellerPartnerCreate(BaseModel):
 class ResellerPartnerUpdate(BaseModel):
     reseller_name: str | None = Field(default=None, min_length=1, max_length=200)
     is_active: bool | None = None
+    service_tier_definition_id: UUID | None = None
 
 
 class ResellerPartner(ResellerPartnerBase):
     id: UUID
     service_tier: ServiceTierDefinitionSummary | None = None
+    organization_count: int = 0
+    total_user_count: int = 0
+    partner_admin_count: int = 0
     created_at: datetime
     updated_at: datetime
+
+
+ResellerLifecycleAction = Literal["activate", "inactivate", "delete"]
+
+
+class ResellerLifecycleActionRequest(BaseModel):
+    action: ResellerLifecycleAction
+
+
+class ResellerLifecycleActionResult(BaseModel):
+    reseller_id: UUID
+    action: ResellerLifecycleAction
+    resulting_status: Literal["active", "inactive", "deleted"]
+    impacted_organization_count: int
+    impacted_user_count: int
+    impacted_partner_admin_count: int
+    message: str
 
 
 class ResellerTenantDefaultsBase(BaseModel):

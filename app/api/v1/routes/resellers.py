@@ -8,6 +8,8 @@ from app.db import get_db
 from app.models import ResellerPartner
 from app.schemas import (
     ListEnvelope,
+    ResellerLifecycleActionRequest,
+    ResellerLifecycleActionResult,
     ResellerPartner as ResellerPartnerSchema,
     ResellerPartnerCreate,
     ResellerPartnerUpdate,
@@ -18,11 +20,15 @@ from app.schemas import (
 )
 from app.security import Principal, require_permission
 from app.services import (
+    activate_reseller_state,
+    delete_reseller_and_tenants,
     ensure_scope_access,
     generate_reseller_key,
+    get_reseller_impact_counts,
     get_service_tier_or_404,
     get_or_create_reseller_defaults,
     get_reseller_or_404,
+    inactivate_reseller_state,
     serialize_model,
     sync_reseller_default_service_tier_fields,
     sync_reseller_service_tier_fields,
@@ -33,10 +39,12 @@ from app.services import (
 router = APIRouter()
 
 
-def to_reseller_schema(reseller: ResellerPartner) -> ResellerPartnerSchema:
+def to_reseller_schema(db: Session, reseller: ResellerPartner) -> ResellerPartnerSchema:
+    impact_counts = get_reseller_impact_counts(db, reseller)
     return ResellerPartnerSchema.model_validate(
         {
             **json.loads(serialize_model(reseller)),
+            **impact_counts,
             "service_tier": (
                 ServiceTierDefinitionSummary.model_validate(reseller.service_tier, from_attributes=True)
                 if reseller.service_tier is not None
@@ -73,7 +81,7 @@ def list_resellers(
     items = []
     for reseller in db.scalars(query):
         ensure_scope_access(principal, reseller_partner_id=reseller.id)
-        items.append(to_reseller_schema(reseller))
+        items.append(to_reseller_schema(db, reseller))
     return ListEnvelope[ResellerPartnerSchema](items=items, page=1, page_size=len(items) or 1, total_count=len(items), filters={"is_active": is_active})
 
 
@@ -109,7 +117,7 @@ def create_reseller(
     )
     db.commit()
     db.refresh(reseller)
-    return ResourceEnvelope[ResellerPartnerSchema](resource=to_reseller_schema(reseller), updated_at=reseller.updated_at)
+    return ResourceEnvelope[ResellerPartnerSchema](resource=to_reseller_schema(db, reseller), updated_at=reseller.updated_at)
 
 
 @router.patch("/{reseller_id}", response_model=ResourceEnvelope[ResellerPartnerSchema])
@@ -149,7 +157,107 @@ def update_reseller(
     )
     db.commit()
     db.refresh(reseller)
-    return ResourceEnvelope[ResellerPartnerSchema](resource=to_reseller_schema(reseller), updated_at=reseller.updated_at)
+    return ResourceEnvelope[ResellerPartnerSchema](resource=to_reseller_schema(db, reseller), updated_at=reseller.updated_at)
+
+
+@router.post("/{reseller_id}/actions", response_model=ResourceEnvelope[ResellerLifecycleActionResult])
+def run_reseller_lifecycle_action(
+    reseller_id: str,
+    payload: ResellerLifecycleActionRequest,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_permission("resellers.write")),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[ResellerLifecycleActionResult]:
+    reseller = get_reseller_or_404(db, reseller_id)
+    ensure_scope_access(principal, reseller_partner_id=reseller.id)
+    before = serialize_model(reseller)
+
+    if payload.action == "inactivate":
+        counts = inactivate_reseller_state(db, reseller)
+        write_audit_log(
+            db,
+            principal,
+            action_type="reseller.lifecycle.inactivate",
+            target_type="reseller",
+            target_id=reseller.id,
+            before=before,
+            after=serialize_model(reseller),
+            request_id=request_id,
+        )
+        db.commit()
+        db.refresh(reseller)
+        return ResourceEnvelope[ResellerLifecycleActionResult](
+            resource=ResellerLifecycleActionResult(
+                reseller_id=reseller.id,
+                action=payload.action,
+                resulting_status="inactive",
+                impacted_organization_count=counts["organization_count"],
+                impacted_user_count=counts["total_user_count"],
+                impacted_partner_admin_count=counts["partner_admin_count"],
+                message=(
+                    f"Partner inactivated. Disabled {counts['partner_admin_count']} partner admin login(s), "
+                    f"{counts['organization_count']} organization(s), and {counts['total_user_count']} user account(s)."
+                ),
+            ),
+            updated_at=reseller.updated_at,
+        )
+
+    if payload.action == "activate":
+        counts = activate_reseller_state(db, reseller)
+        write_audit_log(
+            db,
+            principal,
+            action_type="reseller.lifecycle.activate",
+            target_type="reseller",
+            target_id=reseller.id,
+            before=before,
+            after=serialize_model(reseller),
+            request_id=request_id,
+        )
+        db.commit()
+        db.refresh(reseller)
+        return ResourceEnvelope[ResellerLifecycleActionResult](
+            resource=ResellerLifecycleActionResult(
+                reseller_id=reseller.id,
+                action=payload.action,
+                resulting_status="active",
+                impacted_organization_count=counts["organization_count"],
+                impacted_user_count=counts["total_user_count"],
+                impacted_partner_admin_count=counts["partner_admin_count"],
+                message=(
+                    f"Partner reactivated. Re-enabled {counts['partner_admin_count']} partner admin login(s), "
+                    f"{counts['organization_count']} organization(s), and {counts['total_user_count']} user account(s)."
+                ),
+            ),
+            updated_at=reseller.updated_at,
+        )
+
+    counts = delete_reseller_and_tenants(db, reseller)
+    write_audit_log(
+        db,
+        principal,
+        action_type="reseller.lifecycle.delete",
+        target_type="reseller",
+        target_id=reseller_id,
+        before=before,
+        request_id=request_id,
+    )
+    db.commit()
+    return ResourceEnvelope[ResellerLifecycleActionResult](
+        resource=ResellerLifecycleActionResult(
+            reseller_id=reseller_id,
+            action=payload.action,
+            resulting_status="deleted",
+            impacted_organization_count=counts["organization_count"],
+            impacted_user_count=counts["total_user_count"],
+            impacted_partner_admin_count=counts["partner_admin_count"],
+            message=(
+                f"Deleted inactive partner along with {counts['organization_count']} organization(s) "
+                f"and {counts['total_user_count']} user account(s)."
+            ),
+        ),
+        updated_at=reseller.updated_at,
+    )
 
 
 @router.get("/{reseller_id}/tenant-defaults", response_model=ResourceEnvelope[ResellerTenantDefaultsSummary])
