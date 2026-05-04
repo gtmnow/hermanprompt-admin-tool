@@ -136,6 +136,7 @@ export function ResellersPage() {
   const [adminPreset, setAdminPreset] = useState<ResellerAdminPresetKey>("autonomous");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [pendingLifecycleAction, setPendingLifecycleAction] = useState<ResellerLifecycleAction | null>(null);
+  const [pendingTenantRemoval, setPendingTenantRemoval] = useState<{ tenantId: string; tenantName: string } | null>(null);
 
   const resellersQuery = useQuery({
     queryKey: ["resellers"],
@@ -325,12 +326,16 @@ export function ResellersPage() {
 
   const unassignTenantMutation = useMutation({
     mutationFn: (tenantId: string) => tenantApi.updateTenant(tenantId, { reseller_partner_id: null }),
+    onMutate: async () => {
+      setSuccessMessage(null);
+    },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["tenants"] }),
         queryClient.invalidateQueries({ queryKey: ["onboarding"] }),
         queryClient.invalidateQueries({ queryKey: ["resellers"] }),
       ]);
+      setPendingTenantRemoval(null);
       setSuccessMessage("Organization removed from partner.");
     },
   });
@@ -646,7 +651,12 @@ export function ResellersPage() {
                           <button
                             className="ghost-button"
                             disabled={unassignTenantMutation.isPending || !selectedReseller?.is_active}
-                            onClick={() => unassignTenantMutation.mutate(tenant.tenant.id)}
+                            onClick={() =>
+                              setPendingTenantRemoval({
+                                tenantId: tenant.tenant.id,
+                                tenantName: tenant.tenant.tenant_name,
+                              })
+                            }
                             type="button"
                           >
                             Remove
@@ -1219,6 +1229,57 @@ export function ResellersPage() {
                 className="secondary-button"
                 disabled={runResellerActionMutation.isPending}
                 onClick={() => setPendingLifecycleAction(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedReseller && pendingTenantRemoval ? (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setPendingTenantRemoval(null)}>
+          <div
+            className="dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="partner-tenant-removal-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <CardHelpTooltip text="Confirms removing the organization from the current partner portfolio and returning it to the unassigned tenant pool." />
+            <div className="split-header">
+              <div>
+                <h3 className="panel-title" id="partner-tenant-removal-dialog-title">Remove Organization From Partner</h3>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  {pendingTenantRemoval.tenantName} will be removed from {selectedReseller.reseller_name} and moved into the unassigned tenant state.
+                </div>
+              </div>
+            </div>
+
+            <div className="section-note section-note--danger" style={{ marginTop: 18 }}>
+              This only removes the organization from the partner portfolio. It does not delete the organization or its users.
+            </div>
+
+            {unassignTenantMutation.error ? (
+              <div className="section-note section-note--danger" style={{ marginTop: 14 }}>
+                {mutationMessage(unassignTenantMutation.error)}
+              </div>
+            ) : null}
+
+            <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
+              <button
+                className="ghost-button"
+                disabled={unassignTenantMutation.isPending}
+                onClick={() => unassignTenantMutation.mutate(pendingTenantRemoval.tenantId)}
+                type="button"
+              >
+                {unassignTenantMutation.isPending ? "Removing..." : "Confirm Remove"}
+              </button>
+              <button
+                className="secondary-button"
+                disabled={unassignTenantMutation.isPending}
+                onClick={() => setPendingTenantRemoval(null)}
                 type="button"
               >
                 Cancel
