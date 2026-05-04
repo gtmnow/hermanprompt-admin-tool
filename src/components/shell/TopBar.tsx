@@ -34,15 +34,14 @@ export function TopBar() {
     <header className="topbar">
       <div className="logo-wordmark">
         <img src={logoUrl} alt="HermanScience logo" />
-        <div className="brand-tagline">CREATING AI-CONFIDENT WORKFORCES</div>
       </div>
 
       <div className="topbar-spacer" />
 
       <label className="topbar-scope-picker" htmlFor="tenant_scope_picker">
-        <Building2 size={22} />
+        <Building2 size={18} />
         <div className="topbar-scope-picker__value">{selectedLabel}</div>
-        <ChevronDown size={20} className="topbar-scope-picker__chevron" />
+        <ChevronDown size={16} className="topbar-scope-picker__chevron" />
         <select
           id="tenant_scope_picker"
           className="topbar-scope-picker__native"

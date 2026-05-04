@@ -77,13 +77,6 @@ button {
   z-index: 10;
 }
 
-.brand-tagline {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-  color: var(--text-muted);
-}
-
 .app-shell__body {
   display: flex;
   flex: 1;
@@ -317,22 +310,24 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 18px;
+  height: 38px;
+  padding: 0 16px;
   border-radius: 999px;
   border: 0;
   background: #e9edf3;
   color: #3a4b67;
-  min-width: 280px;
-  max-width: 360px;
+  min-width: 220px;
+  max-width: 300px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  box-sizing: border-box;
 }
 
 .topbar-scope-picker__value {
   flex: 1;
   color: inherit;
-  font-size: 20px;
-  line-height: 1.1;
-  font-weight: 800;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 700;
   min-width: 0;
 }
 
@@ -1204,7 +1199,4 @@ button {
     flex-wrap: wrap;
   }
 
-  .brand-tagline {
-    display: none;
-  }
 }
