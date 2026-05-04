@@ -44,7 +44,7 @@ export function resolveReportScope(args: {
     return {
       valid: Boolean(reseller),
       scopeId: reseller?.id ?? "",
-      scopeLabel: reseller?.reseller_name ?? "Selected reseller",
+      scopeLabel: reseller?.reseller_name ?? "Selected partner",
       dimension: "reseller" as const,
     };
   }

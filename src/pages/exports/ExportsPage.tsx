@@ -184,7 +184,7 @@ export function ExportsPage() {
                 onChange={(event) => setScopeType(event.target.value as ReportScopeType)}
               >
                 <option value="global">All Visible Organizations</option>
-                <option value="reseller">Single Reseller Portfolio</option>
+                <option value="reseller">Single Partner Portfolio</option>
                 <option value="organization">Single Organization</option>
                 <option value="group">Single Group</option>
               </select>
@@ -217,7 +217,7 @@ export function ExportsPage() {
               </select>
             </div>
             <div>
-              <label className="field-label" htmlFor="export_reseller">Reseller</label>
+              <label className="field-label" htmlFor="export_reseller">Partner</label>
               <select
                 className="field"
                 id="export_reseller"
@@ -225,7 +225,7 @@ export function ExportsPage() {
                 onChange={(event) => setResellerId(event.target.value)}
                 disabled={scopeType !== "reseller"}
               >
-                <option value="">Select reseller</option>
+                <option value="">Select partner</option>
                 {(resellersQuery.data?.items ?? []).map((reseller) => (
                   <option key={reseller.id} value={reseller.id}>
                     {reseller.reseller_name}

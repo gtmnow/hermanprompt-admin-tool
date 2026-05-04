@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
+import { titleCase } from "../../lib/format";
 import type { ResellerTenantDefaults } from "../../lib/types";
 
 const emptyDefaults: Omit<ResellerTenantDefaults, "id" | "reseller_partner_id" | "created_at" | "updated_at"> = {
@@ -37,7 +38,7 @@ const emptyDefaults: Omit<ResellerTenantDefaults, "id" | "reseller_partner_id" |
 
 const resellerAdminPresets = {
   autonomous: {
-    label: "Autonomous Reseller",
+    label: "Autonomous Partner",
     permissions: [
       "resellers.read",
       "tenants.read",
@@ -203,7 +204,7 @@ export function ResellersPage() {
   const updateResellerTierMutation = useMutation({
     mutationFn: () => {
       if (!selectedResellerId) {
-        throw new Error("Select a reseller first.");
+        throw new Error("Select a partner first.");
       }
       return tenantApi.updateReseller(selectedResellerId, {
         service_tier_definition_id: selectedResellerTierId || null,
@@ -217,7 +218,7 @@ export function ResellersPage() {
   const saveDefaultsMutation = useMutation({
     mutationFn: () => {
       if (!selectedResellerId) {
-        throw new Error("Select a reseller first.");
+        throw new Error("Select a partner first.");
       }
       return tenantApi.updateResellerDefaults(selectedResellerId, {
         ...defaultsForm,
@@ -233,7 +234,7 @@ export function ResellersPage() {
   const createAdminMutation = useMutation({
     mutationFn: () => {
       if (!selectedResellerId) {
-        throw new Error("Select a reseller first.");
+        throw new Error("Select a partner first.");
       }
       return tenantApi.createAdmin({
         user_id_hash: adminForm.user_id_hash,
@@ -280,7 +281,7 @@ export function ResellersPage() {
     resellerTiersQuery.isLoading ||
     organizationTiersQuery.isLoading
   ) {
-    return <LoadingBlock label="Loading reseller workspace..." />;
+    return <LoadingBlock label="Loading partner workspace..." />;
   }
 
   const resellers = resellersQuery.data?.items ?? [];
@@ -321,9 +322,9 @@ export function ResellersPage() {
     <div className="stack">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Resellers</h1>
+          <h1 className="page-title">Partners</h1>
           <p className="page-subtitle">
-            Create reseller partners, define their portfolio scope, assign reseller admins, and seed tenant defaults without changing shared cross-system tables.
+            Create partners, define their portfolio scope, assign partner admins, and seed tenant defaults without changing shared cross-system tables.
           </p>
         </div>
       </div>
@@ -331,9 +332,9 @@ export function ResellersPage() {
       <div className="grid grid--two">
         <div className="panel stack">
           <div>
-            <h3 className="panel-title">Create Reseller</h3>
+            <h3 className="panel-title">Create Partner</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              Start a new reseller partner record and then configure its admins, portfolio, and defaults from the workspace on the right.
+              Start a new partner record and then configure its admins, portfolio, and defaults from the workspace on the right.
             </div>
           </div>
 
@@ -342,7 +343,7 @@ export function ResellersPage() {
           ) : null}
 
           <div>
-            <label className="field-label" htmlFor="reseller_key">Reseller Key</label>
+            <label className="field-label" htmlFor="reseller_key">Partner Key</label>
             <input
               className="field"
               id="reseller_key"
@@ -351,7 +352,7 @@ export function ResellersPage() {
             />
           </div>
           <div>
-            <label className="field-label" htmlFor="reseller_name">Reseller Name</label>
+            <label className="field-label" htmlFor="reseller_name">Partner Name</label>
             <input
               className="field"
               id="reseller_name"
@@ -360,14 +361,14 @@ export function ResellersPage() {
             />
           </div>
           <div>
-            <label className="field-label" htmlFor="create_reseller_tier">Reseller Tier</label>
+            <label className="field-label" htmlFor="create_reseller_tier">Partner Tier</label>
             <select
               className="field"
               id="create_reseller_tier"
               value={createForm.service_tier_definition_id}
               onChange={(event) => setCreateForm((current) => ({ ...current, service_tier_definition_id: event.target.value }))}
             >
-              <option value="">Select reseller tier</option>
+              <option value="">Select partner tier</option>
               {resellerTiers.map((tier) => (
                 <option key={tier.id} value={tier.id}>
                   {tier.tier_name}
@@ -382,14 +383,14 @@ export function ResellersPage() {
             onClick={() => createResellerMutation.mutate()}
             type="button"
           >
-            {createResellerMutation.isPending ? "Creating..." : "Create reseller"}
+            {createResellerMutation.isPending ? "Creating..." : "Create partner"}
           </button>
 
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Reseller</th>
+                  <th>Partner</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -416,28 +417,28 @@ export function ResellersPage() {
 
         <div className="panel stack">
           {!selectedReseller ? (
-            <div className="empty-state">Create or select a reseller to open its foundation workspace.</div>
+            <div className="empty-state">Create or select a partner to open its foundation workspace.</div>
           ) : (
             <>
               <div className="split-header">
                 <div>
                   <h3 className="panel-title">{selectedReseller.reseller_name}</h3>
                   <div className="muted">{selectedReseller.reseller_key}</div>
-                  <div className="muted">{selectedReseller.service_tier?.tier_name ?? "No reseller tier assigned"}</div>
+                  <div className="muted">{selectedReseller.service_tier?.tier_name ?? "No partner tier assigned"}</div>
                 </div>
                 <StatusBadge value={selectedReseller.is_active ? "active" : "inactive"} />
               </div>
 
               <div className="field-row">
                 <div>
-                  <label className="field-label" htmlFor="selected_reseller_tier">Reseller Tier</label>
+                  <label className="field-label" htmlFor="selected_reseller_tier">Partner Tier</label>
                   <select
                     className="field"
                     id="selected_reseller_tier"
                     value={selectedResellerTierId}
                     onChange={(event) => setSelectedResellerTierId(event.target.value)}
                   >
-                    <option value="">No reseller tier assigned</option>
+                    <option value="">No partner tier assigned</option>
                     {resellerTiers.map((tier) => (
                       <option key={tier.id} value={tier.id}>
                         {tier.tier_name}
@@ -447,7 +448,7 @@ export function ResellersPage() {
                 </div>
                 <div style={{ alignSelf: "end" }}>
                   <button className="secondary-button" onClick={() => updateResellerTierMutation.mutate()} type="button">
-                    {updateResellerTierMutation.isPending ? "Saving..." : "Save reseller tier"}
+                    {updateResellerTierMutation.isPending ? "Saving..." : "Save partner tier"}
                   </button>
                 </div>
               </div>
@@ -456,7 +457,7 @@ export function ResellersPage() {
                 <div className="card metric-card">
                   <div className="metric-card__label">Portfolio Tenants</div>
                   <div className="metric-card__value">{assignedTenants.length}</div>
-                  <div className="metric-card__trend">Currently assigned to this reseller</div>
+                  <div className="metric-card__trend">Currently assigned to this partner</div>
                 </div>
                 <div className="card metric-card">
                   <div className="metric-card__label">Ready To Activate</div>
@@ -485,7 +486,7 @@ export function ResellersPage() {
             <div>
               <h3 className="panel-title">Portfolio Scope</h3>
               <div className="muted" style={{ marginTop: 8 }}>
-                Assign customer tenants that this reseller should own, including controlled transfers from other reseller portfolios when needed.
+                Assign customer tenants that this partner should own, including controlled transfers from other partner portfolios when needed.
               </div>
             </div>
 
@@ -501,7 +502,7 @@ export function ResellersPage() {
                 <tbody>
                   {assignedTenants.length === 0 ? (
                     <tr>
-                      <td colSpan={3}>No tenants are assigned to this reseller yet.</td>
+                      <td colSpan={3}>No tenants are assigned to this partner yet.</td>
                     </tr>
                   ) : (
                     assignedTenants.map((tenant) => (
@@ -576,7 +577,7 @@ export function ResellersPage() {
                 <thead>
                   <tr>
                     <th>Transfer Candidate</th>
-                    <th>Current Reseller</th>
+                    <th>Current Partner</th>
                     <th>Status</th>
                     <th>Action</th>
                   </tr>
@@ -584,7 +585,7 @@ export function ResellersPage() {
                 <tbody>
                   {transferCandidates.length === 0 ? (
                     <tr>
-                      <td colSpan={4}>No other reseller-owned tenants are currently available to transfer.</td>
+                      <td colSpan={4}>No other partner-owned tenants are currently available to transfer.</td>
                     </tr>
                   ) : (
                     transferCandidates.map((tenant) => (
@@ -619,7 +620,7 @@ export function ResellersPage() {
           <div>
             <h3 className="panel-title">Portfolio Health</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              Review portfolio-wide onboarding, credential, and activation health for this reseller.
+              Review portfolio-wide onboarding, credential, and activation health for this partner.
             </div>
           </div>
 
@@ -636,7 +637,7 @@ export function ResellersPage() {
               <tbody>
                 {portfolioHealthRows.length === 0 ? (
                   <tr>
-                    <td colSpan={4}>No tenants are assigned to this reseller yet.</td>
+                    <td colSpan={4}>No tenants are assigned to this partner yet.</td>
                   </tr>
                 ) : (
                   portfolioHealthRows.map(({ tenant, onboardingState, issueSummary }) => (
@@ -656,9 +657,9 @@ export function ResellersPage() {
           </div>
 
           <div>
-            <h3 className="panel-title">Reseller Admin Capabilities</h3>
+            <h3 className="panel-title">Partner Admin Capabilities</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-                Create reseller-scoped admins with a capability preset. These admins receive reseller scope, not global scope.
+                Create partner-scoped admins with a capability preset. These admins receive partner scope, not global scope.
               </div>
             </div>
 
@@ -709,7 +710,7 @@ export function ResellersPage() {
               onClick={() => createAdminMutation.mutate()}
               type="button"
             >
-              {createAdminMutation.isPending ? "Creating..." : "Create reseller admin"}
+              {createAdminMutation.isPending ? "Creating..." : "Create partner admin"}
             </button>
 
             <div className="table-wrap">
@@ -724,7 +725,7 @@ export function ResellersPage() {
                 <tbody>
                   {resellerAdmins.length === 0 ? (
                     <tr>
-                      <td colSpan={3}>No reseller-scoped admins exist for this reseller yet.</td>
+                      <td colSpan={3}>No partner-scoped admins exist for this partner yet.</td>
                     </tr>
                   ) : (
                     resellerAdmins.map((admin) => (
@@ -733,7 +734,7 @@ export function ResellersPage() {
                           <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
                           <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
                         </td>
-                        <td>{admin.role}</td>
+                        <td>{titleCase(admin.role)}</td>
                         <td>{admin.permissions.length}</td>
                       </tr>
                     ))
@@ -750,7 +751,7 @@ export function ResellersPage() {
           <div>
             <h3 className="panel-title">Tenant Defaults</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              These defaults are stored in admin-tool-owned tables and applied only when a new tenant is created under this reseller.
+              These defaults are stored in admin-tool-owned tables and applied only when a new tenant is created under this partner.
             </div>
           </div>
 
@@ -874,7 +875,7 @@ export function ResellersPage() {
                 <option value="platform_managed">HermanScience predefined setup</option>
                 <option value="customer_managed">Organization provided credentials</option>
               </select>
-              <div className="field-tip">Choose whether new orgs under this reseller should default to a predefined HermanScience LLM setup or start with organization-provided credentials.</div>
+              <div className="field-tip">Choose whether new orgs under this partner should default to a predefined HermanScience LLM setup or start with organization-provided credentials.</div>
             </div>
           </div>
 
@@ -1040,7 +1041,7 @@ export function ResellersPage() {
           </div>
 
           <button className="primary-button" onClick={() => saveDefaultsMutation.mutate()} type="button">
-            {saveDefaultsMutation.isPending ? "Saving..." : "Save reseller defaults"}
+            {saveDefaultsMutation.isPending ? "Saving..." : "Save partner defaults"}
           </button>
         </div>
       ) : null}

@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
-import { formatDateTime } from "../../lib/format";
+import { formatDateTime, titleCase } from "../../lib/format";
 import type { Group, UserMembership } from "../../lib/types";
 
 type UserActionKind = "deactivate" | "reinvite" | "delete";
@@ -961,7 +961,7 @@ export function UsersPage() {
                           >
                             {adminRoleOptions.map((role) => (
                               <option key={role} value={role}>
-                                {role}
+                                {titleCase(role)}
                               </option>
                             ))}
                           </select>

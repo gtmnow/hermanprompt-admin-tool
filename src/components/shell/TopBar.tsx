@@ -3,6 +3,7 @@ import { Bell, Building2, ChevronDown } from "lucide-react";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { useOrganizationScope } from "../../app/providers/OrganizationScopeProvider";
 import logoUrl from "../../assets/AI_confident_logo.png";
+import { titleCase } from "../../lib/format";
 
 function initialsFor(displayName: string | null | undefined, fallback: string) {
   const source = displayName?.trim() || fallback.trim() || "Admin User";
@@ -20,10 +21,7 @@ export function TopBar() {
   const profile = session?.principal.profile;
   const displayName = profile?.display_name || session?.principal.user_id_hash || "Admin User";
   const email = profile?.email || session?.principal.user_id_hash || "Authenticated Admin";
-  const roleLabel = (session?.principal.role || "admin")
-    .split("_")
-    .map((part) => part[0]?.toUpperCase() + part.slice(1))
-    .join(" ");
+  const roleLabel = titleCase(session?.principal.role || "admin");
   const selectedLabel = hasMultipleVisibleTenants
     ? selectedTenantId
       ? visibleTenants.find((tenant) => tenant.tenant.id === selectedTenantId)?.tenant.tenant_name ?? "Select organization"

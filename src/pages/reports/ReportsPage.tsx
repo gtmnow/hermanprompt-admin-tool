@@ -219,7 +219,7 @@ export function ReportsPage() {
               onChange={(event) => setScopeType(event.target.value as ReportScopeType)}
             >
               <option value="global">All Visible Organizations</option>
-              <option value="reseller">Single Reseller Portfolio</option>
+              <option value="reseller">Single Partner Portfolio</option>
               <option value="organization">Single Organization</option>
               <option value="group">Single Group</option>
             </select>
@@ -246,14 +246,14 @@ export function ReportsPage() {
         {scopeType === "reseller" ? (
           <div className="field-row">
             <div>
-              <label className="field-label" htmlFor="report_reseller">Reseller</label>
+              <label className="field-label" htmlFor="report_reseller">Partner</label>
               <select
                 className="field"
                 id="report_reseller"
                 value={resellerId}
                 onChange={(event) => setResellerId(event.target.value)}
               >
-                <option value="">Select reseller</option>
+                <option value="">Select partner</option>
                 {(resellersQuery.data?.items ?? []).map((reseller) => (
                   <option key={reseller.id} value={reseller.id}>
                     {reseller.reseller_name}

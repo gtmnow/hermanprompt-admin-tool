@@ -25,5 +25,8 @@ export function formatDateTime(value: string | null | undefined): string {
 }
 
 export function titleCase(value: string): string {
-  return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  return value
+    .replace(/_/g, " ")
+    .replace(/\breseller\b/gi, "partner")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }

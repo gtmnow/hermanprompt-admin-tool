@@ -131,7 +131,7 @@ export function ServiceTiersPage() {
         <div>
           <h1 className="page-title">Service Tiers</h1>
           <p className="page-subtitle">
-            Manage the organization and reseller tier catalog that controls provisioning limits and commercial defaults.
+            Manage the organization and partner tier catalog that controls provisioning limits and commercial defaults.
           </p>
         </div>
       </div>
@@ -162,7 +162,7 @@ export function ServiceTiersPage() {
                 onChange={(event) => setForm((current) => ({ ...current, scope_type: event.target.value as ServiceTierScope }))}
               >
                 <option value="organization">Organization</option>
-                <option value="reseller">Reseller</option>
+                <option value="reseller">Partner</option>
               </select>
             </div>
             <div>
@@ -306,8 +306,8 @@ export function ServiceTiersPage() {
 
           <div className="panel stack">
             <div>
-              <h3 className="panel-title">Reseller Tiers</h3>
-              <div className="muted">These tiers govern reseller portfolio capacity and optional organization-count caps.</div>
+              <h3 className="panel-title">Partner Tiers</h3>
+              <div className="muted">These tiers govern partner portfolio capacity and optional organization-count caps.</div>
             </div>
             <div className="table-wrap">
               <table className="data-table">

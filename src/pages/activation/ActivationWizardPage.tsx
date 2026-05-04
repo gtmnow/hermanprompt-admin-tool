@@ -11,6 +11,7 @@ import { WizardStepper } from "../../components/forms/WizardStepper";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
 import { businessUnitOptions } from "../../features/tenants/groupOptions";
+import { titleCase } from "../../lib/format";
 import type { PlatformManagedLlmConfig, UserMembership } from "../../lib/types";
 import { parseImportedUsers } from "../../lib/userImport";
 
@@ -867,7 +868,7 @@ export function ActivationWizardPage() {
                 <div className="field-row field-row--three">
                   <div>
                     <label className="field-label" htmlFor="reseller_partner_id">
-                      Reseller
+                      Partner
                     </label>
                     <select className="field" id="reseller_partner_id" {...form.register("reseller_partner_id")}>
                       <option value="">Direct / HermanScience managed</option>
@@ -877,7 +878,7 @@ export function ActivationWizardPage() {
                         </option>
                       ))}
                     </select>
-                    <div className="field-tip">Select a reseller when this tenant should be created inside a reseller-owned portfolio and inherit reseller defaults.</div>
+                    <div className="field-tip">Select a partner when this tenant should be created inside a partner-owned portfolio and inherit partner defaults.</div>
                   </div>
                   <div>
                     <label className="field-label" htmlFor="organization_type">
@@ -1682,8 +1683,8 @@ export function ActivationWizardPage() {
                               <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
                               <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
                             </td>
-                            <td>{admin.role}</td>
-                            <td>{admin.scopes.map((scope) => scope.scope_type).join(", ")}</td>
+                            <td>{titleCase(admin.role)}</td>
+                            <td>{admin.scopes.map((scope) => titleCase(scope.scope_type)).join(", ")}</td>
                           </tr>
                         ))}
                       </tbody>

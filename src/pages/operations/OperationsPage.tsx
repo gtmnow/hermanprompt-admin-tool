@@ -164,18 +164,18 @@ export function OperationsPage() {
         <div className="split-header">
           <div>
             <h3 className="panel-title">Investigation Filters</h3>
-            <div className="muted">Scope the issue queue and audit activity to a reseller or a specific tenant.</div>
+            <div className="muted">Scope the issue queue and audit activity to a partner or a specific tenant.</div>
           </div>
         </div>
 
         <div className="field-row field-row--three">
           <div>
-            <label className="field-label" htmlFor="operations_reseller">Reseller</label>
+            <label className="field-label" htmlFor="operations_reseller">Partner</label>
             <select className="field" id="operations_reseller" value={resellerFilter} onChange={(event) => {
               setResellerFilter(event.target.value);
               setTenantFilter("all");
             }}>
-              <option value="all">All visible resellers</option>
+              <option value="all">All visible partners</option>
               {resellers.map((reseller) => (
                 <option key={reseller.id} value={reseller.id}>
                   {reseller.reseller_name}
@@ -202,7 +202,7 @@ export function OperationsPage() {
               <option value="group">Group</option>
               <option value="admin_user">Admin</option>
               <option value="report_export_job">Export Job</option>
-              <option value="reseller_partner">Reseller</option>
+              <option value="reseller_partner">Partner</option>
             </select>
           </div>
         </div>

@@ -7,6 +7,7 @@ import { useAuth } from "../../app/providers/AuthProvider";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
+import { titleCase } from "../../lib/format";
 import type { AdminUser, Group, UserMembership } from "../../lib/types";
 
 const adminPermissionPresets = {
@@ -729,14 +730,14 @@ export function AdminsPage() {
                       <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
                       <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
                     </td>
-                    <td>{admin.role}</td>
+                    <td>{titleCase(admin.role)}</td>
                     <td>
                       {admin.scopes
                         .map((scope) => {
                           if (scope.tenant_id) {
                             return tenantNameById.get(scope.tenant_id) ?? scope.tenant_id;
                           }
-                          return scope.scope_type;
+                          return titleCase(scope.scope_type);
                         })
                         .join(", ")}
                     </td>
