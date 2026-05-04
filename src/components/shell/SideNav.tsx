@@ -3,15 +3,15 @@ import { NavLink } from "react-router-dom";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: Gauge },
-  { to: "/activation", label: "Activation", icon: Rocket },
-  { to: "/resellers", label: "Partners", icon: Handshake },
   { to: "/orgs", label: "Organizations", icon: Building2 },
-  { to: "/users", label: "Users", icon: Users },
+  { to: "/activation", label: "Activation", icon: Rocket },
   { to: "/groups", label: "Groups", icon: Layers3 },
+  { to: "/users", label: "Users", icon: Users },
   { to: "/admins", label: "Admins", icon: UserCog },
   { to: "/reports", label: "Reporting", icon: BarChart3 },
-  { to: "/operations", label: "Operations", icon: Server },
   { to: "/exports", label: "Exports", icon: FileDown },
+  { to: "/resellers", label: "Partners", icon: Handshake },
+  { to: "/operations", label: "Operations", icon: Server },
   { to: "/tiers", label: "Service Tiers", icon: Tags },
   { to: "/settings", label: "Settings", icon: Cog },
 ];
