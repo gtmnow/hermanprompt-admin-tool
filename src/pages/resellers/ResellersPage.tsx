@@ -98,7 +98,6 @@ export function ResellersPage() {
   const queryClient = useQueryClient();
   const [selectedResellerId, setSelectedResellerId] = useState("");
   const [createForm, setCreateForm] = useState({
-    reseller_key: "",
     reseller_name: "",
     service_tier_definition_id: "",
   });
@@ -190,13 +189,12 @@ export function ResellersPage() {
   const createResellerMutation = useMutation({
     mutationFn: () =>
       tenantApi.createReseller({
-        reseller_key: createForm.reseller_key.trim(),
         reseller_name: createForm.reseller_name.trim(),
         is_active: true,
         service_tier_definition_id: createForm.service_tier_definition_id || null,
       }),
     onSuccess: async (result) => {
-      setCreateForm({ reseller_key: "", reseller_name: "", service_tier_definition_id: "" });
+      setCreateForm({ reseller_name: "", service_tier_definition_id: "" });
       await queryClient.invalidateQueries({ queryKey: ["resellers"] });
       setSelectedResellerId(result.resource.id);
     },
@@ -345,15 +343,6 @@ export function ResellersPage() {
           ) : null}
 
           <div>
-            <label className="field-label" htmlFor="reseller_key">Partner Key</label>
-            <input
-              className="field"
-              id="reseller_key"
-              value={createForm.reseller_key}
-              onChange={(event) => setCreateForm((current) => ({ ...current, reseller_key: event.target.value }))}
-            />
-          </div>
-          <div>
             <label className="field-label" htmlFor="reseller_name">Partner Name</label>
             <input
               className="field"
@@ -361,6 +350,7 @@ export function ResellersPage() {
               value={createForm.reseller_name}
               onChange={(event) => setCreateForm((current) => ({ ...current, reseller_name: event.target.value }))}
             />
+            <div className="field-tip">A partner key is generated internally from this name when the record is created.</div>
           </div>
           <div>
             <label className="field-label" htmlFor="create_reseller_tier">Partner Tier</label>
@@ -381,7 +371,7 @@ export function ResellersPage() {
 
           <button
             className="primary-button"
-            disabled={!createForm.reseller_key.trim() || !createForm.reseller_name.trim()}
+            disabled={!createForm.reseller_name.trim()}
             onClick={() => createResellerMutation.mutate()}
             type="button"
           >

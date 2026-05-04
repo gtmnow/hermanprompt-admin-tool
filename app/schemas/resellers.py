@@ -13,8 +13,11 @@ class ResellerPartnerBase(BaseModel):
     service_tier_definition_id: UUID | None = None
 
 
-class ResellerPartnerCreate(ResellerPartnerBase):
-    pass
+class ResellerPartnerCreate(BaseModel):
+    reseller_key: str | None = Field(default=None, min_length=1, max_length=100)
+    reseller_name: str = Field(min_length=1, max_length=200)
+    is_active: bool = True
+    service_tier_definition_id: UUID | None = None
 
 
 class ResellerPartnerUpdate(BaseModel):

@@ -19,6 +19,7 @@ from app.schemas import (
 from app.security import Principal, require_permission
 from app.services import (
     ensure_scope_access,
+    generate_reseller_key,
     get_service_tier_or_404,
     get_or_create_reseller_defaults,
     get_reseller_or_404,
@@ -83,7 +84,9 @@ def create_reseller(
     principal: Principal = Depends(require_permission("resellers.create")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[ResellerPartnerSchema]:
-    reseller = ResellerPartner(**payload.model_dump())
+    payload_data = payload.model_dump()
+    payload_data["reseller_key"] = payload.reseller_key or generate_reseller_key(db, payload.reseller_name)
+    reseller = ResellerPartner(**payload_data)
     if payload.service_tier_definition_id:
         tier = get_service_tier_or_404(
             db,

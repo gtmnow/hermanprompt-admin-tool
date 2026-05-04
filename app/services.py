@@ -467,6 +467,18 @@ def generate_tenant_key(db: Session, tenant_name: str, *, exclude_tenant_id: str
         suffix += 1
 
 
+def generate_reseller_key(db: Session, reseller_name: str, *, exclude_reseller_id: str | None = None) -> str:
+    base_key = normalize_tier_key(reseller_name) or "partner"
+    candidate = base_key
+    suffix = 2
+    while True:
+        existing = db.scalar(select(ResellerPartner).where(ResellerPartner.reseller_key == candidate))
+        if existing is None or existing.id == exclude_reseller_id:
+            return candidate
+        candidate = f"{base_key}-{suffix}"
+        suffix += 1
+
+
 def ensure_additive_schema_extensions() -> None:
     with engine.begin() as connection:
         inspector = inspect(connection)
