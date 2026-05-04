@@ -62,6 +62,39 @@ def safe_datetime(value: object | None):
     return parse_datetime(value) if isinstance(value, (str, datetime)) else None
 
 
+def ensure_single_tenant_membership(
+    db: Session,
+    *,
+    user_id_hash: str,
+    target_tenant: Tenant,
+) -> None:
+    conflicting_membership = db.scalar(
+        select(UserTenantMembership).where(
+            UserTenantMembership.user_id_hash == user_id_hash,
+            UserTenantMembership.tenant_id != target_tenant.id,
+            UserTenantMembership.status != "deleted",
+        )
+    )
+    if conflicting_membership is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User already belongs to another organization",
+        )
+
+    allowed_tenant_ids = set(auth_tenant_candidates(target_tenant))
+    deactivated_tenant = db.scalar(select(Tenant).where(Tenant.tenant_key == "Deactivated_Users"))
+    if deactivated_tenant is not None:
+        allowed_tenant_ids.update(auth_tenant_candidates(deactivated_tenant))
+
+    for auth_row in get_auth_users(db, user_id_hash):
+        auth_tenant_id = string_value(auth_row.get("tenant_id"))
+        if auth_tenant_id and auth_tenant_id not in allowed_tenant_ids:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User already belongs to another organization",
+            )
+
+
 def auth_row_has_credentials(auth_row: dict[str, object] | None) -> bool:
     if auth_row is None:
         return False
@@ -715,6 +748,7 @@ def create_user_membership(
     )
     if existing_membership is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already assigned to this organization")
+    ensure_single_tenant_membership(db, user_id_hash=resolved_user_id_hash, target_tenant=tenant)
     validate_tenant_user_limit(db, tenant)
 
     auth_row = upsert_auth_user(
@@ -731,7 +765,7 @@ def create_user_membership(
         user_id_hash=resolved_user_id_hash,
         tenant_id=str(payload.tenant_id),
         status=payload.status,
-        is_primary=payload.is_primary,
+        is_primary=True,
     )
     db.add(membership)
     db.flush()
@@ -869,6 +903,9 @@ def update_user_membership(
         current_first_name = parts[0]
         current_last_name = parts[1] if len(parts) > 1 else None
 
+    if membership is None:
+        ensure_single_tenant_membership(db, user_id_hash=user_id_hash, target_tenant=tenant)
+
     auth_row = upsert_auth_user(
         db,
         tenant=tenant,
@@ -886,7 +923,7 @@ def update_user_membership(
             user_id_hash=user_id_hash,
             tenant_id=tenant_id,
             status=payload.status or ("active" if bool(auth_row.get("is_active")) else "inactive"),
-            is_primary=payload.is_primary if payload.is_primary is not None else True,
+            is_primary=True,
         )
         db.add(membership)
         db.flush()
@@ -895,8 +932,7 @@ def update_user_membership(
 
     if payload.status is not None:
         membership.status = payload.status
-    if payload.is_primary is not None:
-        membership.is_primary = payload.is_primary
+    membership.is_primary = True
     if payload.group_ids is not None:
         db.execute(delete(UserGroupMembership).where(UserGroupMembership.tenant_membership_id == membership.id))
         for group_id in payload.group_ids:
@@ -1007,6 +1043,7 @@ def run_user_lifecycle_action(
             membership.status = "inactive"
     elif payload.action == "reinvite":
         if membership is None or membership.status == "deleted":
+            ensure_single_tenant_membership(db, user_id_hash=user_id_hash, target_tenant=tenant)
             validate_tenant_user_limit(db, tenant)
         target_status = "invited"
         auth_row = upsert_auth_user(
