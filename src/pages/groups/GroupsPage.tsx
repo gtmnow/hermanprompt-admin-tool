@@ -265,14 +265,14 @@ export function GroupsPage() {
           <div>
             <h3 className="panel-title">How Groups Fit</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              The imported Herman Prompt snapshot gives us realistic users and activity, while groups remain admin-owned setup records that the activation flow can shape.
+              The imported HermanPrompt snapshot gives us realistic users and activity, while groups remain admin-owned setup records that the activation flow can shape.
             </div>
           </div>
           <div className="section-note">
             Create business-unit or team-level groups here first, then use the activation workflow to review readiness and assign tenant admins.
           </div>
           <div className="section-note">
-            If an organization is already live in Herman Prompt, these groups still belong to the admin layer and can evolve without direct service calls.
+            If an organization is already live in HermanPrompt, these groups still belong to the admin layer and can evolve without direct service calls.
           </div>
           <div className="section-note">
             {groupCoverageGap.length === 0

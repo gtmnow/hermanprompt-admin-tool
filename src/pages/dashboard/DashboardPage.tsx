@@ -99,7 +99,7 @@ export function DashboardPage() {
         <div>
           <h1 className="page-title">Good afternoon, Michael</h1>
           <p className="page-subtitle">
-            Here&apos;s what&apos;s happening across {selectedScopeLabel} for {selectedRangeLabel.toLowerCase()} in your current Herman Prompt admin scope.
+            Here&apos;s what&apos;s happening across {selectedScopeLabel} for {selectedRangeLabel.toLowerCase()} in your current HermanPrompt admin scope.
           </p>
         </div>
         <Link className="primary-button" to="/activation">
@@ -128,14 +128,14 @@ export function DashboardPage() {
         <div className="card metric-card">
           <div className="metric-card__label">Users In Session</div>
           <div className="metric-card__value">{sessionUserCount}</div>
-          <div className="metric-card__trend">Authenticated users with captured Herman Prompt session activity</div>
+          <div className="metric-card__trend">Authenticated users with captured HermanPrompt session activity</div>
         </div>
       </div>
 
       <div className="split-header">
         <div>
           <h3 className="panel-title">Trends</h3>
-          <div className="muted">Live Herman Prompt activity and improvement across the selected reporting window</div>
+          <div className="muted">Live HermanPrompt activity and improvement across the selected reporting window</div>
         </div>
         <div className="range-pill-group" role="tablist" aria-label="Dashboard reporting period">
           {DASHBOARD_RANGE_OPTIONS.map((option) => (
@@ -156,7 +156,7 @@ export function DashboardPage() {
       <div className="grid grid--two">
         <SimpleTrendChart
           title="Usage Trend"
-          subtitle={`Captured Herman Prompt conversation activity for ${selectedRangeLabel.toLowerCase()}`}
+          subtitle={`Captured HermanPrompt conversation activity for ${selectedRangeLabel.toLowerCase()}`}
           data={usageTrend}
           color="#0284C7"
           emptyMessage="Not enough recorded session activity in this period to draw a usage trend yet."

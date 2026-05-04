@@ -331,7 +331,7 @@ export function SettingsPage() {
           <div>
             <h3 className="panel-title">Active Prompt UI</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              Track which Herman Prompt UI deployment this admin tool is currently paired with for operator reference.
+              Track which HermanPrompt UI deployment this admin tool is currently paired with for operator reference.
             </div>
           </div>
 
@@ -942,7 +942,7 @@ export function SettingsPage() {
         <div>
           <h3 className="panel-title">Register Prompt UI</h3>
           <div className="muted" style={{ marginTop: 8 }}>
-            Save the active Herman Prompt frontend deployment URL used by the admin team.
+            Save the active HermanPrompt frontend deployment URL used by the admin team.
           </div>
         </div>
 
@@ -1064,7 +1064,7 @@ export function SettingsPage() {
         <div className="split-header">
           <div>
             <h3 className="panel-title">Configured Prompt UI Instances</h3>
-            <div className="muted">Use this list to keep the admin app pointed at the currently active Herman Prompt frontend deployment.</div>
+            <div className="muted">Use this list to keep the admin app pointed at the currently active HermanPrompt frontend deployment.</div>
           </div>
         </div>
 

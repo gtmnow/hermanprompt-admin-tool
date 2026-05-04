@@ -254,7 +254,7 @@ export function OrganizationDetailPage() {
               <div className="split-header">
                 <div>
                   <h3 className="panel-title">Organization Summary</h3>
-                  <div className="muted">The core overview uses admin-owned settings plus live Herman Prompt activity</div>
+                  <div className="muted">The core overview uses admin-owned settings plus live HermanPrompt activity</div>
                 </div>
               </div>
               <div className="key-value">

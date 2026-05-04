@@ -482,7 +482,7 @@ export function UsersPage() {
         <div>
           <h1 className="page-title">Users</h1>
           <p className="page-subtitle">
-            Review the current Herman Prompt user inventory inside the admin tool, including auth-backed identity records, activity, organization context, and editable access assignments.
+            Review the current HermanPrompt user inventory inside the admin tool, including auth-backed identity records, activity, organization context, and editable access assignments.
           </p>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>

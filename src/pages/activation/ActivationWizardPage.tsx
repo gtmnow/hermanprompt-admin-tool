@@ -905,7 +905,7 @@ export function ActivationWizardPage() {
                         </option>
                       ))}
                     </select>
-                    <div className="field-tip">This should reflect the customer&apos;s primary operating industry, not necessarily every department using Herman Prompt.</div>
+                    <div className="field-tip">This should reflect the customer&apos;s primary operating industry, not necessarily every department using HermanPrompt.</div>
                   </div>
                   <div>
                     <label className="field-label" htmlFor="service_mode">
@@ -1524,7 +1524,7 @@ export function ActivationWizardPage() {
                 </div>
                 {hasDetectedUsers ? (
                   <div className="section-note">
-                    {detectedUsers.length} existing users were found for this organization in the live Herman Prompt snapshot. Those users remain available in the main <Link to="/users">Users</Link> screen.
+                    {detectedUsers.length} existing users were found for this organization in the live HermanPrompt snapshot. Those users remain available in the main <Link to="/users">Users</Link> screen.
                   </div>
                 ) : null}
 
@@ -1855,7 +1855,7 @@ export function ActivationWizardPage() {
                     <strong>{groups.length}</strong> groups are configured for this organization. This step is optional.
                   </div>
                   <div className="section-note">
-                    <strong>{detectedUsers.length}</strong> users are currently available from the live Herman Prompt snapshot.
+                    <strong>{detectedUsers.length}</strong> users are currently available from the live HermanPrompt snapshot.
                   </div>
                 </div>
                 {onboardingBlockers.length > 0 ? (
@@ -1881,7 +1881,7 @@ export function ActivationWizardPage() {
                   </div>
                 ) : null}
                 <div className="section-note">
-                  Activation remains a DB-state change only. This admin tool records the configuration and readiness markers in the database and does not drive Herman Prompt or Herman Transform directly.
+                  Activation remains a DB-state change only. This admin tool records the configuration and readiness markers in the database and does not drive HermanPrompt or Herman Transform directly.
                 </div>
                 <div className="field-row">
                   <div>
