@@ -25,7 +25,6 @@ type UserEditForm = {
   email: string;
   title: string;
   status: UserMembership["status"];
-  is_primary: boolean;
   group_ids: string[];
   admin_role: string;
 };
@@ -56,7 +55,6 @@ const defaultUserEditForm: UserEditForm = {
   email: "",
   title: "",
   status: "invited",
-  is_primary: true,
   group_ids: [],
   admin_role: "",
 };
@@ -126,7 +124,6 @@ function buildUserEditForm(user: UserMembership): UserEditForm {
     email: user.profile?.email ?? "",
     title: user.profile?.title ?? "",
     status: user.status,
-    is_primary: user.is_primary,
     group_ids: user.group_memberships.map((membership) => membership.group_id),
     admin_role: user.admin_role?.role ?? "",
   };
@@ -344,7 +341,6 @@ export function UsersPage() {
         email: userEditForm.email || null,
         title: userEditForm.title || null,
         status: userEditForm.status,
-        is_primary: userEditForm.is_primary,
         group_ids: userEditForm.group_ids,
       });
     },
@@ -1125,20 +1121,6 @@ export function UsersPage() {
                             <option value="inactive">Inactive</option>
                             <option value="suspended">Suspended</option>
                           </select>
-                        </div>
-                        <div className="users-page__primary-toggle">
-                          <label className="field-label" htmlFor="manage_user_primary">Primary Membership</label>
-                          <label className="users-page__primary-toggle-label">
-                            <input
-                              id="manage_user_primary"
-                              checked={userEditForm.is_primary}
-                              onChange={(event) =>
-                                setUserEditForm((current) => ({ ...current, is_primary: event.target.checked }))
-                              }
-                              type="checkbox"
-                            />
-                            <span>Flag as the primary organization membership</span>
-                          </label>
                         </div>
                       </div>
 
