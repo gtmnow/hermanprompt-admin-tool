@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { tenantApi } from "../../features/tenants/api";
 import type { ServiceTierScope } from "../../lib/types";
 import { formatDateTime } from "../../lib/format";
@@ -144,6 +145,7 @@ export function ServiceTiersPage() {
 
       <div className="grid grid--two">
         <div className="panel stack">
+          <CardHelpTooltip text="Creates or edits organization and partner service tiers that govern capacity, fees, and provisioning defaults." />
           <div className="split-header">
             <div>
               <h3 className="panel-title">{selectedTier ? "Edit Tier" : "Create Tier"}</h3>
@@ -275,6 +277,7 @@ export function ServiceTiersPage() {
 
         <div className="stack">
           <div className="panel stack">
+            <CardHelpTooltip text="Lists organization-facing service tiers and the user limits they make available to customer organizations." />
             <div>
               <h3 className="panel-title">Organization Tiers</h3>
               <div className="muted">These tiers govern the user limits available to customer organizations.</div>
@@ -305,6 +308,7 @@ export function ServiceTiersPage() {
           </div>
 
           <div className="panel stack">
+            <CardHelpTooltip text="Lists partner-facing service tiers and the portfolio capacity each tier allows." />
             <div>
               <h3 className="panel-title">Partner Tiers</h3>
               <div className="muted">These tiers govern partner portfolio capacity and optional organization-count caps.</div>

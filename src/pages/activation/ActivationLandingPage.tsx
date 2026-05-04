@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
@@ -74,6 +75,7 @@ export function ActivationLandingPage() {
 
       <div className="grid grid--two">
         <div className="panel">
+          <CardHelpTooltip text="Summarizes how many organizations are still in draft, actively onboarding, or ready to activate." />
           <h3 className="panel-title">Onboarding Summary</h3>
           <div className="checklist" style={{ marginTop: 18 }}>
             <div className="checklist-item">
@@ -92,6 +94,7 @@ export function ActivationLandingPage() {
         </div>
 
         <div className="panel">
+          <CardHelpTooltip text="Explains the main activation workflow steps and what must be complete before an organization can go live." />
           <h3 className="panel-title">Activation Help</h3>
           <div className="stack" style={{ marginTop: 18 }}>
             <div className="section-note">Step through organization info, LLM config, runtime settings, groups, users, and admins before activation.</div>
@@ -101,6 +104,7 @@ export function ActivationLandingPage() {
       </div>
 
       <div className="table-card">
+        <CardHelpTooltip text="Lists draft and onboarding organizations so admins can resume setup, review progress, and see current blockers." />
         <div className="table-wrap">
           <table className="data-table">
             <thead>

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
@@ -500,21 +501,25 @@ export function UsersPage() {
 
       <div className="kpi-grid users-page__kpis">
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many user memberships are currently visible in the active filters and scope." />
           <div className="metric-card__label">Users</div>
           <div className="metric-card__value">{users.length}</div>
           <div className="metric-card__trend">Within the current visible scope</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many visible users are currently interpreted as active by Herman Admin." />
           <div className="metric-card__label">Active Users</div>
           <div className="metric-card__value">{activeUsers}</div>
           <div className="metric-card__trend">Based on current Herman Admin status interpretation</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many visible users already have captured conversation session history." />
           <div className="metric-card__label">With Sessions</div>
           <div className="metric-card__value">{withSessions}</div>
           <div className="metric-card__trend">Users with captured conversation history</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many organizations are represented in the current user result set." />
           <div className="metric-card__label">Organizations</div>
           <div className="metric-card__value">{visibleOrganizations}</div>
           <div className="metric-card__trend">Represented in the current results</div>
@@ -522,6 +527,7 @@ export function UsersPage() {
       </div>
 
       <div className="panel users-page__panel">
+        <CardHelpTooltip text="Lets admins filter, sort, and review the current user inventory across organizations and groups." />
         <div className="split-header users-page__filters">
           <div>
             <h3 className="panel-title">User Inventory</h3>
@@ -608,6 +614,7 @@ export function UsersPage() {
         </div>
 
         <div className="table-card users-page__table-card">
+          <CardHelpTooltip text="Shows the current user results with organization, status, role, session, and improvement context." />
           <div className="table-wrap">
             <table className="data-table users-page__table">
               <thead>
@@ -681,6 +688,7 @@ export function UsersPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="split-header">
+              <CardHelpTooltip text="Creates a single organization user with an initial type, status, and optional starting group assignment." />
               <div>
                 <h3 className="panel-title" id="create-user-dialog-title">Create User</h3>
                 <div className="muted" style={{ marginTop: 6 }}>
@@ -849,6 +857,7 @@ export function UsersPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="split-header">
+              <CardHelpTooltip text="Central user-management workspace for status, profile, admin role, lifecycle actions, and detail inspection." />
               <div>
                 <h3 className="panel-title" id="user-status-dialog-title">Manage User</h3>
                 <div className="muted" style={{ marginTop: 6 }}>
@@ -943,6 +952,7 @@ export function UsersPage() {
                   ) : null}
 
                   <div className="panel panel--inset users-page__dialog-panel">
+                    <CardHelpTooltip text="Shows and updates the user's Herman Admin role assignment and current permission set." />
                     <h3 className="panel-title">Admin Role</h3>
                     <div className="users-page__dialog-panel-body">
                       {dialogUser?.admin_role ? (
@@ -984,6 +994,7 @@ export function UsersPage() {
                   </div>
 
                   <div className="panel panel--inset users-page__dialog-panel">
+                    <CardHelpTooltip text="Shows and edits group assignments for the selected user inside their organization." />
                     <h3 className="panel-title">Groups</h3>
                     <div className="users-page__dialog-panel-body">
                       {selectedUserGroups.length === 0 ? (
@@ -1011,6 +1022,7 @@ export function UsersPage() {
                   </div>
 
                   <div className="panel panel--inset users-page__dialog-panel">
+                    <CardHelpTooltip text="Provides deactivate, re-invite, and delete actions using the current user lifecycle rules." />
                     <h3 className="panel-title">Lifecycle Actions</h3>
                     <div className="users-page__dialog-panel-body">
                       <div className="section-note">
@@ -1057,6 +1069,7 @@ export function UsersPage() {
 
                 <div className="users-page__dialog-main">
                   <div className="panel panel--inset users-page__dialog-panel">
+                    <CardHelpTooltip text="Lets admins edit profile and membership fields for the selected user." />
                     <h3 className="panel-title">Profile & Membership</h3>
                     <div className="users-page__dialog-panel-body">
                       <div className="field-row field-row--three">
@@ -1138,6 +1151,7 @@ export function UsersPage() {
                   </div>
 
                   <div className="panel panel--inset users-page__dialog-panel">
+                    <CardHelpTooltip text="Displays foundational, effective, and supplemental profile sections from the current Herman Admin data sources." />
                     <div className="split-header users-page__detail-header">
                       <div>
                         <h3 className="panel-title">Read-Only Detail Sections</h3>
@@ -1189,6 +1203,7 @@ export function UsersPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="split-header">
+              <CardHelpTooltip text="Explains whether the requested user create action fits within the organization's current service-tier user limit." />
               <div>
                 <h3 className="panel-title" id="users-limit-dialog-title">User Limit Check</h3>
                 <div className="muted" style={{ marginTop: 6 }}>

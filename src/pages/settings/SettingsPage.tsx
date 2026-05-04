@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { tenantApi } from "../../features/tenants/api";
 import { formatDateTime } from "../../lib/format";
 import type { PlatformManagedLlmTestResult } from "../../lib/types";
@@ -295,6 +296,7 @@ export function SettingsPage() {
 
       <div className="grid grid--two">
         <div className="panel stack">
+          <CardHelpTooltip text="Shows which live runtime database the running API will actually write to for HermanScience LLM changes." />
           <div>
             <h3 className="panel-title">Runtime Database Target</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -328,6 +330,7 @@ export function SettingsPage() {
         </div>
 
         <div className="panel stack">
+          <CardHelpTooltip text="Shows which HermanPrompt frontend deployment is currently marked active for admin reference." />
           <div>
             <h3 className="panel-title">Active Prompt UI</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -356,6 +359,7 @@ export function SettingsPage() {
         </div>
 
         <div className="panel stack">
+          <CardHelpTooltip text="Shows the health and capabilities of the secret vault used for sensitive credential storage." />
           <div>
             <h3 className="panel-title">Secret Vault</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -401,6 +405,7 @@ export function SettingsPage() {
         </div>
 
         <div className="panel stack">
+          <CardHelpTooltip text="Lists the shared HermanScience-managed LLM configurations available for assignment to organizations." />
           <div>
             <h3 className="panel-title">HermanScience LLM Pool</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -486,6 +491,7 @@ export function SettingsPage() {
       </div>
 
       <div className="panel stack">
+        <CardHelpTooltip text="Stores operator reference records for known database environments without changing the live runtime target." />
         <div>
           <h3 className="panel-title">Register Database Instance</h3>
           <div className="muted" style={{ marginTop: 8 }}>
@@ -637,6 +643,7 @@ export function SettingsPage() {
 
       <div className="grid grid--two">
         <div className="panel stack">
+          <CardHelpTooltip text="Creates a new shared HermanScience-managed LLM entry and validates its connection before saving." />
           <div>
             <h3 className="panel-title">Add HermanScience LLM</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -714,6 +721,7 @@ export function SettingsPage() {
           </div>
 
           <div className="panel" style={{ background: "rgba(248, 250, 252, 0.7)" }}>
+            <CardHelpTooltip text="Tests the provider URL, model, and key so admins can validate configuration before saving it to the pool." />
             <div className="stack" style={{ gap: 10 }}>
               <div>
                 <div className="panel-title" style={{ fontSize: "0.95rem" }}>Test Configuration</div>
@@ -826,6 +834,7 @@ export function SettingsPage() {
         </div>
 
         <div className="panel stack">
+          <CardHelpTooltip text="Updates endpoint, availability, notes, or credentials for a selected shared HermanScience LLM." />
           <div>
             <h3 className="panel-title">Configure HermanScience LLM</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -939,6 +948,7 @@ export function SettingsPage() {
       </div>
 
       <div className="panel stack">
+        <CardHelpTooltip text="Registers a HermanPrompt frontend deployment URL and marks it active for admin reference." />
         <div>
           <h3 className="panel-title">Register Prompt UI</h3>
           <div className="muted" style={{ marginTop: 8 }}>
@@ -1007,6 +1017,7 @@ export function SettingsPage() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Lists saved database reference records for operators, separate from the live runtime database target." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">Configured Database Instances</h3>
@@ -1061,6 +1072,7 @@ export function SettingsPage() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Lists saved HermanPrompt UI deployment records and which one is currently active." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">Configured Prompt UI Instances</h3>

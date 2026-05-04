@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { SimpleTrendChart } from "../../components/charts/SimpleTrendChart";
 import { StatusBadge } from "../../components/status/StatusBadge";
@@ -187,21 +188,25 @@ export function OrganizationDetailPage() {
 
       <div className="kpi-grid">
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many users belong to this organization and how many are currently active." />
           <div className="metric-card__label">Users</div>
           <div className="metric-card__value">{users.length}</div>
           <div className="metric-card__trend">{activeUsers} active</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many groups are currently defined for this organization." />
           <div className="metric-card__label">Groups</div>
           <div className="metric-card__value">{groups.length}</div>
           <div className="metric-card__trend">Scoped group management</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows the average prompt-score improvement for this organization in the selected reporting period." />
           <div className="metric-card__label">Avg Improvement</div>
           <div className="metric-card__value">{averageImprovement}</div>
           <div className="metric-card__trend">Average session score delta for {rangeLabel.toLowerCase()}</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many users have session activity and how many admins are assigned to this organization." />
           <div className="metric-card__label">Users In Session</div>
           <div className="metric-card__value">{sessionUsers}</div>
           <div className="metric-card__trend">
@@ -213,6 +218,7 @@ export function OrganizationDetailPage() {
       {location.pathname === `/orgs/${tenantId}` ? (
         <div className="stack">
           <div className="split-header">
+            <CardHelpTooltip text="Shows live reporting trends and scoring activity for this organization." />
             <div>
               <h3 className="panel-title">Reporting</h3>
               <div className="muted">Live activity and scoring snapshots for this organization</div>
@@ -237,6 +243,7 @@ export function OrganizationDetailPage() {
             <SimpleTrendChart
               title="Usage Trend"
               subtitle={`Conversation activity for ${rangeLabel.toLowerCase()}`}
+              tooltipText="Shows how conversation activity changes over time for this organization."
               data={usageTrend}
               color="#0284C7"
               emptyMessage="Not enough recorded session activity in this period to draw a usage trend yet."
@@ -244,6 +251,7 @@ export function OrganizationDetailPage() {
             <SimpleTrendChart
               title="Improvement Trend"
               subtitle="Average delta from initial to final prompt score"
+              tooltipText="Shows how average improvement changes over the selected reporting period."
               data={improvementTrend}
               emptyMessage="No scored sessions were found in this reporting window, so improvement is not plotted yet."
             />
@@ -251,6 +259,7 @@ export function OrganizationDetailPage() {
 
           <div className="grid grid--two">
             <div className="panel">
+              <CardHelpTooltip text="Summarizes the organization's key setup, onboarding, contact, and LLM details." />
               <div className="split-header">
                 <div>
                   <h3 className="panel-title">Organization Summary</h3>
@@ -308,6 +317,7 @@ export function OrganizationDetailPage() {
             </div>
 
             <div className="panel">
+              <CardHelpTooltip text="Provides a quick tenant-scoped user snapshot for the organization." />
               <div className="split-header">
                 <div>
                   <h3 className="panel-title">Recent Users</h3>
@@ -350,6 +360,7 @@ export function OrganizationDetailPage() {
             </div>
 
             <div className="panel">
+              <CardHelpTooltip text="Shows checklist completion for the backend onboarding record tied to this organization." />
               <div className="split-header">
                 <div>
                   <h3 className="panel-title">Onboarding Checklist</h3>
@@ -395,6 +406,7 @@ export function OrganizationDetailPage() {
             aria-labelledby="tenant-status-dialog-title"
             onClick={(event) => event.stopPropagation()}
           >
+            <CardHelpTooltip text="Lets admins update the current organization status or trigger lifecycle actions." />
             <div className="split-header">
               <div>
                 <h3 className="panel-title" id="tenant-status-dialog-title">Manage Organization Status</h3>

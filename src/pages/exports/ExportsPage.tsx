@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { useOrganizationScope } from "../../app/providers/OrganizationScopeProvider";
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { DASHBOARD_RANGE_OPTIONS, getRangeWindow, type DashboardRangeKey } from "../../features/dashboard/api";
@@ -145,6 +146,7 @@ export function ExportsPage() {
 
       <div className="grid grid--two">
         <div className="panel stack">
+          <CardHelpTooltip text="Configures a new export job using report type, scope, range, and file format selections." />
           <div>
             <h3 className="panel-title">Create Export</h3>
             <div className="muted">Build a shareable file from the same reporting scopes used in the analytics workspace.</div>
@@ -282,6 +284,7 @@ export function ExportsPage() {
         </div>
 
         <div className="panel stack">
+          <CardHelpTooltip text="Explains how CSV and PDF exports are best used and where generated files can be retrieved." />
           <div>
             <h3 className="panel-title">Export Notes</h3>
             <div className="muted">CSV exports are metric-friendly. PDF exports are shareable snapshots for stakeholder review.</div>
@@ -293,6 +296,7 @@ export function ExportsPage() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Shows recently generated export jobs in the current admin-visible scope, including status and completion history." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">Recent Export Jobs</h3>

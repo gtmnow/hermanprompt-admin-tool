@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { WizardStepper } from "../../components/forms/WizardStepper";
 import { StatusBadge } from "../../components/status/StatusBadge";
@@ -799,6 +800,7 @@ export function ActivationWizardPage() {
       <div className="wizard-layout">
         <div className="stack">
           <div className="panel">
+            <CardHelpTooltip text="Contains the current activation step form and step-by-step navigation controls for organization setup." />
             <div className="split-header">
               <div>
                 <h3 className="panel-title">{steps[activeStep]}</h3>
@@ -988,6 +990,7 @@ export function ActivationWizardPage() {
                 </div>
 
                 <div className="panel panel--inset">
+                  <CardHelpTooltip text="Captures the tenant-facing portal URL, logo, and welcome message that will appear during Herman Portal login and invitation acceptance." />
                   <h3 className="panel-title">Portal Setup</h3>
                   <div className="muted" style={{ marginTop: 8, marginBottom: 18 }}>
                     Configure the tenant-facing Herman Portal branding content that will appear on login and invitation acceptance screens.
@@ -1639,6 +1642,7 @@ export function ActivationWizardPage() {
                 </div>
 
                 <div className="panel panel--inset">
+                  <CardHelpTooltip text="Lets admins paste multiple user rows at once so HermanPrompt memberships can be created in bulk during activation." />
                   <h3 className="panel-title">Bulk Import</h3>
                   <div className="muted" style={{ marginTop: 8, marginBottom: 16 }}>
                     Supported headers include `email,first_name,last_name,title,group_name,status,user_id_hash,initial_user_type`.
@@ -1861,6 +1865,7 @@ export function ActivationWizardPage() {
                 </div>
                 {onboardingBlockers.length > 0 ? (
                   <div className="panel panel--inset">
+                    <CardHelpTooltip text="Lists the incomplete setup requirements that still block this organization from being activated." />
                     <h3 className="panel-title">Remaining blockers</h3>
                     <div className="checklist" style={{ marginTop: 18 }}>
                       {onboardingBlockers.map((blocker) => (
@@ -1919,6 +1924,7 @@ export function ActivationWizardPage() {
 
         <aside className="stack">
           <div className="panel">
+            <CardHelpTooltip text="Tracks overall activation progress across all seven steps and lets admins jump between unlocked steps." />
             <h3 className="panel-title">Progress</h3>
             <div className="muted" style={{ marginTop: 8, marginBottom: 18 }}>
               Save draft progress at every step and use the side panel to track readiness.
@@ -1937,6 +1943,7 @@ export function ActivationWizardPage() {
           </div>
 
           <div className="panel">
+            <CardHelpTooltip text="Summarizes the key readiness checkpoints for activation, including org setup, LLM validation, user creation, admin assignment, and optional group setup." />
             <h3 className="panel-title">Status Panel</h3>
             <div className="checklist" style={{ marginTop: 18 }}>
               {[
@@ -1955,6 +1962,7 @@ export function ActivationWizardPage() {
           </div>
 
           <div className="panel">
+            <CardHelpTooltip text="Shows a quick snapshot of important organization details gathered so far, including industry, contact, group count, branding, and user count." />
             <h3 className="panel-title">Organization Snapshot</h3>
             <div className="key-value" style={{ marginTop: 18 }}>
               <div className="muted">Industry</div>
@@ -1989,6 +1997,7 @@ export function ActivationWizardPage() {
             aria-labelledby="invite-users-dialog-title"
             onClick={(event) => event.stopPropagation()}
           >
+            <CardHelpTooltip text="Confirms whether newly created users should receive invitation emails immediately after being added in the activation flow." />
             <div className="split-header">
               <div>
                 <h3 className="panel-title" id="invite-users-dialog-title">Invite New Users?</h3>
@@ -2042,6 +2051,7 @@ export function ActivationWizardPage() {
             aria-labelledby="user-limit-dialog-title"
             onClick={(event) => event.stopPropagation()}
           >
+            <CardHelpTooltip text="Checks whether the requested single-user add or bulk import stays within the organization's service-tier user allowance." />
             <div className="split-header">
               <div>
                 <h3 className="panel-title" id="user-limit-dialog-title">User Limit Check</h3>

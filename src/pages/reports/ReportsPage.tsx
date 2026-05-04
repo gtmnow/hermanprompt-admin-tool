@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { useOrganizationScope } from "../../app/providers/OrganizationScopeProvider";
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { SimpleTrendChart } from "../../components/charts/SimpleTrendChart";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { DASHBOARD_RANGE_OPTIONS, getRangeLabel, getRangeWindow, type DashboardRangeKey } from "../../features/dashboard/api";
@@ -161,6 +162,7 @@ export function ReportsPage() {
       </div>
 
       <div className="panel stack">
+        <CardHelpTooltip text="Lets admins pick a report type, scope, and timeframe before generating analytics or exporting the result." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">Generate Report</h3>
@@ -329,6 +331,7 @@ export function ReportsPage() {
           <div className="kpi-grid">
             {report.kpis.map((item) => (
               <div className="card metric-card" key={item.label}>
+                <CardHelpTooltip text={`Shows the ${item.label} KPI for the selected report type, scope, and reporting range.`} />
                 <div className="metric-card__label">{item.label}</div>
                 <div className="metric-card__value">{item.value}</div>
                 <div className="metric-card__trend">{selectedReportType?.label} / {rangeLabel}</div>
@@ -340,6 +343,7 @@ export function ReportsPage() {
             <SimpleTrendChart
               title="Usage Trend"
               subtitle={`Observed session activity for ${resolvedScope.scopeLabel}`}
+              tooltipText="Shows how recorded usage changes over time for the current report scope."
               data={usageTrend}
               color="#0284C7"
               emptyMessage="Not enough recorded activity is available yet to show a usage trend."
@@ -347,6 +351,7 @@ export function ReportsPage() {
             <SimpleTrendChart
               title="Improvement Trend"
               subtitle="Average delta from initial to final prompt score"
+              tooltipText="Shows whether prompt improvement is increasing or decreasing over the selected window."
               data={improvementTrend}
               emptyMessage="No scored sessions were found in this reporting window, so improvement is not plotted yet."
             />
@@ -354,6 +359,7 @@ export function ReportsPage() {
 
           <div className="grid grid--two">
             <div className="panel">
+              <CardHelpTooltip text="Summarizes the current report's quality band, improvement average, and momentum signals." />
               <div className="split-header">
                 <div>
                   <h3 className="panel-title">Prompt Quality Analysis</h3>
@@ -377,6 +383,7 @@ export function ReportsPage() {
             </div>
 
             <div className="panel">
+              <CardHelpTooltip text="Calls out behavior or adoption gaps that may need follow-up based on the current report signals." />
               <div className="split-header">
                 <div>
                   <h3 className="panel-title">Behavior Gaps</h3>
@@ -398,6 +405,7 @@ export function ReportsPage() {
           </div>
 
           <div className="panel">
+            <CardHelpTooltip text="Lists the portable metric values that feed exports and downstream stakeholder summaries." />
             <div className="split-header">
               <div>
                 <h3 className="panel-title">Report Metrics</h3>

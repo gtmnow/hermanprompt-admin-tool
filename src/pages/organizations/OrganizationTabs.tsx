@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useOutletContext } from "react-router-dom";
 
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
 import { businessUnitOptions } from "../../features/tenants/groupOptions";
@@ -196,6 +197,7 @@ export function OrganizationUsersTab() {
   return (
     <div className="stack">
       <div className="panel stack">
+        <CardHelpTooltip text="Creates a new user membership directly inside this organization, including initial status, profile details, and optional group assignment." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">Add Organization User</h3>
@@ -315,6 +317,7 @@ export function OrganizationUsersTab() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Lists all users currently linked to this organization with their membership status, group counts, and creation timestamps." />
         <h3 className="panel-title">Users</h3>
         <div className="table-wrap" style={{ marginTop: 18 }}>
           {users.length === 0 ? (
@@ -363,6 +366,7 @@ export function OrganizationUsersTab() {
             aria-labelledby="org-user-limit-dialog-title"
             onClick={(event) => event.stopPropagation()}
           >
+            <CardHelpTooltip text="Checks whether adding another user would stay within the organization's allowed service-tier user limit." />
             <div className="split-header">
               <div>
                 <h3 className="panel-title" id="org-user-limit-dialog-title">User Limit Check</h3>
@@ -425,6 +429,7 @@ export function OrganizationGroupsTab() {
   return (
     <div className="stack">
       <div className="panel stack">
+        <CardHelpTooltip text="Creates admin-owned groups for this organization so users can be organized by team, business unit, or cohort." />
         <div>
           <h3 className="panel-title">Create Group</h3>
           <div className="muted">Add admin-owned teams, business units, or cohort groupings for this organization.</div>
@@ -487,6 +492,7 @@ export function OrganizationGroupsTab() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Shows every group already created for this organization along with business-unit metadata and active status." />
         <h3 className="panel-title">Groups</h3>
         <div className="table-wrap" style={{ marginTop: 18 }}>
           {groups.length === 0 ? (
@@ -545,6 +551,7 @@ export function OrganizationAdminsTab() {
   return (
     <div className="stack">
       <div className="panel stack">
+        <CardHelpTooltip text="Assigns a tenant-scoped admin for this organization using the standard default permissions bundle." />
         <div>
           <h3 className="panel-title">Assign Tenant Admin</h3>
           <div className="muted">Create a tenant-scoped admin with the standard user, group, runtime, and analytics permissions.</div>
@@ -592,6 +599,7 @@ export function OrganizationAdminsTab() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Lists the admins assigned to this organization, including their role type and scope coverage." />
         <h3 className="panel-title">Admins</h3>
         <div className="table-wrap" style={{ marginTop: 18 }}>
           {admins.length === 0 ? (
@@ -738,6 +746,7 @@ export function OrganizationLlmConfigTab() {
   return (
     <div className="stack">
       <div className="panel stack">
+        <CardHelpTooltip text="Configures the organization's LLM provider, credential source, validation state, and prompt transformation settings." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">LLM Configuration</h3>
@@ -1014,6 +1023,7 @@ export function OrganizationPortalTab() {
   return (
     <div className="stack">
       <div className="panel stack">
+        <CardHelpTooltip text="Defines the tenant-facing Herman Portal URL, branding assets, and welcome copy used during login and invite flows." />
         <div>
           <h3 className="panel-title">Portal Branding</h3>
           <div className="muted">Configure the tenant-facing Herman Portal URL, custom logo, and welcome message used on login and invitation acceptance.</div>
@@ -1076,6 +1086,7 @@ export function OrganizationPortalTab() {
       </div>
 
       <div className="panel stack">
+        <CardHelpTooltip text="Previews the current portal branding values that Herman Portal will read for this organization." />
         <div>
           <h3 className="panel-title">Portal Preview Data</h3>
           <div className="muted">This is the content Herman Portal will use once the portal-side auth screens read the shared tenant portal config.</div>
@@ -1137,6 +1148,7 @@ export function OrganizationRuntimeTab() {
   return (
     <div className="stack">
       <div className="panel stack">
+        <CardHelpTooltip text="Controls runtime policy settings for the organization, including enforcement mode, retention, exports, visibility, and feature flags." />
         <div>
           <h3 className="panel-title">Runtime Settings</h3>
           <div className="muted">Manage enforcement, retention, visibility, and feature flags for this organization.</div>
@@ -1282,6 +1294,7 @@ export function OrganizationOnboardingTab() {
   return (
     <div className="stack">
       <div className="panel">
+        <CardHelpTooltip text="Summarizes onboarding checklist progress so admins can see which activation prerequisites are complete for this organization." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">Onboarding</h3>
@@ -1314,6 +1327,7 @@ export function OrganizationOnboardingTab() {
       </div>
 
       <div className="panel stack">
+        <CardHelpTooltip text="Shows the remaining blockers for activation and provides the buttons to activate or override onboarding gates when appropriate." />
         <div>
           <h3 className="panel-title">Activation</h3>
           <div className="muted">Use the blockers below to finish the remaining setup, then activate the organization.</div>

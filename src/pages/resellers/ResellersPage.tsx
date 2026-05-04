@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
@@ -331,6 +332,7 @@ export function ResellersPage() {
 
       <div className="grid grid--two">
         <div className="panel stack">
+          <CardHelpTooltip text="Creates a new partner record and assigns its starting partner tier before portfolio setup begins." />
           <div>
             <h3 className="panel-title">Create Partner</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -416,6 +418,7 @@ export function ResellersPage() {
         </div>
 
         <div className="panel stack">
+          <CardHelpTooltip text="Shows the selected partner's summary, tier assignment, and high-level portfolio KPIs." />
           {!selectedReseller ? (
             <div className="empty-state">Create or select a partner to open its foundation workspace.</div>
           ) : (
@@ -455,21 +458,25 @@ export function ResellersPage() {
 
               <div className="kpi-grid">
                 <div className="card metric-card">
+                  <CardHelpTooltip text="Shows how many tenants are currently assigned to this partner portfolio." />
                   <div className="metric-card__label">Portfolio Tenants</div>
                   <div className="metric-card__value">{assignedTenants.length}</div>
                   <div className="metric-card__trend">Currently assigned to this partner</div>
                 </div>
                 <div className="card metric-card">
+                  <CardHelpTooltip text="Shows how many tenants under this partner are ready to activate or already live." />
                   <div className="metric-card__label">Ready To Activate</div>
                   <div className="metric-card__value">{readyTenants.length}</div>
                   <div className="metric-card__trend">Tenants ready or live under this portfolio</div>
                 </div>
                 <div className="card metric-card">
+                  <CardHelpTooltip text="Shows how many partner-owned tenants still have onboarding work underway." />
                   <div className="metric-card__label">In Progress</div>
                   <div className="metric-card__value">{inProgressTenants.length}</div>
                   <div className="metric-card__trend">Onboarding work still underway</div>
                 </div>
                 <div className="card metric-card">
+                  <CardHelpTooltip text="Shows how many partner-owned tenants are inactive or have configuration issues needing attention." />
                   <div className="metric-card__label">Needs Attention</div>
                   <div className="metric-card__value">{unhealthyTenants.length}</div>
                   <div className="metric-card__trend">Inactive or misconfigured portfolio tenants</div>
@@ -483,6 +490,7 @@ export function ResellersPage() {
       {selectedReseller ? (
         <div className="grid grid--two">
           <div className="panel stack">
+            <CardHelpTooltip text="Lets admins assign, unassign, and transfer tenants inside the selected partner portfolio." />
             <div>
               <h3 className="panel-title">Portfolio Scope</h3>
               <div className="muted" style={{ marginTop: 8 }}>
@@ -617,6 +625,7 @@ export function ResellersPage() {
           </div>
 
         <div className="panel stack">
+          <CardHelpTooltip text="Summarizes onboarding, LLM, and health signals across the selected partner's tenant portfolio." />
           <div>
             <h3 className="panel-title">Portfolio Health</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -657,6 +666,7 @@ export function ResellersPage() {
           </div>
 
           <div>
+            <CardHelpTooltip text="Creates and reviews partner-scoped admin users along with their capability presets." />
             <h3 className="panel-title">Partner Admin Capabilities</h3>
             <div className="muted" style={{ marginTop: 8 }}>
                 Create partner-scoped admins with a capability preset. These admins receive partner scope, not global scope.
@@ -748,6 +758,7 @@ export function ResellersPage() {
 
       {selectedReseller ? (
         <div className="panel stack">
+          <CardHelpTooltip text="Stores the default service, portal, and LLM settings applied when new tenants are created under this partner." />
           <div>
             <h3 className="panel-title">Tenant Defaults</h3>
             <div className="muted" style={{ marginTop: 8 }}>

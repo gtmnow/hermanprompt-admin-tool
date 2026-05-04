@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { tenantApi } from "../../features/tenants/api";
 import { parseImportedUsers } from "../../lib/userImport";
@@ -160,6 +161,7 @@ export function UserImportPage() {
       </div>
 
       <div className="panel stack">
+        <CardHelpTooltip text="Configures a bulk user import by choosing the target organization, pasting rows, and reviewing how many users will be created." />
         <div>
           <h3 className="panel-title">Import Configuration</h3>
           <div className="muted" style={{ marginTop: 8 }}>
@@ -228,6 +230,7 @@ export function UserImportPage() {
             aria-labelledby="users-limit-dialog-title"
             onClick={(event) => event.stopPropagation()}
           >
+            <CardHelpTooltip text="Explains whether the requested bulk import fits within the organization's allowed user count before any records are created." />
             <div className="split-header">
               <div>
                 <h3 className="panel-title" id="users-limit-dialog-title">User Limit Check</h3>

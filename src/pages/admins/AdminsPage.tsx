@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../../app/providers/AuthProvider";
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
@@ -432,6 +433,7 @@ export function AdminsPage() {
 
       <div className="grid grid--two">
         <div className="panel stack">
+          <CardHelpTooltip text="Assigns tenant-scoped admin access to an existing organization user using a preset or custom permission set." />
           <div>
             <h3 className="panel-title">Assign Tenant Admin</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -547,6 +549,7 @@ export function AdminsPage() {
 
         {isSuperAdmin ? (
           <div className="panel stack">
+            <CardHelpTooltip text="Assigns platform-wide super admin access. This card is intentionally restricted to existing super admins." />
             <div>
               <h3 className="panel-title">Assign Super Admin</h3>
               <div className="muted" style={{ marginTop: 8 }}>
@@ -667,6 +670,7 @@ export function AdminsPage() {
           </div>
         ) : (
           <div className="panel stack">
+            <CardHelpTooltip text="Explains why super admin assignment is restricted and unavailable in the current session." />
             <div>
               <h3 className="panel-title">Super Admin Access</h3>
               <div className="muted" style={{ marginTop: 8 }}>
@@ -678,6 +682,7 @@ export function AdminsPage() {
       </div>
 
       <div className="panel stack">
+        <CardHelpTooltip text="Lists current admin assignments, scopes, permissions, and status so admins can review and manage access." />
         <div>
           <h3 className="panel-title">Admin Inventory</h3>
           <div className="muted" style={{ marginTop: 8 }}>
@@ -767,6 +772,7 @@ export function AdminsPage() {
             aria-labelledby="admin-edit-dialog-title"
             onClick={(event) => event.stopPropagation()}
           >
+            <CardHelpTooltip text="Lets admins review and update the selected administrator's role, status, and permission set." />
             <div className="split-header">
               <div>
                 <h3 className="panel-title" id="admin-edit-dialog-title">Manage Admin Role</h3>

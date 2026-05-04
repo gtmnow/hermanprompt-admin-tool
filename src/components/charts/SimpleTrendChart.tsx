@@ -1,4 +1,5 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CardHelpTooltip } from "../cards/CardHelpTooltip";
 
 type Point = {
   bucket: string;
@@ -11,6 +12,7 @@ type SimpleTrendChartProps = {
   data: Point[];
   color?: string;
   emptyMessage?: string;
+  tooltipText?: string;
 };
 
 function formatAxisBucket(bucket: string) {
@@ -40,11 +42,13 @@ export function SimpleTrendChart({
   data,
   color = "#00AEEF",
   emptyMessage = "Not enough scored sessions in this period to show a trend yet.",
+  tooltipText,
 }: SimpleTrendChartProps) {
   const populatedPointCount = data.filter((point) => point.value !== null).length;
 
   return (
     <div className="panel">
+      {tooltipText ? <CardHelpTooltip text={tooltipText} /> : null}
       <div className="split-header">
         <div>
           <h3 className="panel-title">{title}</h3>

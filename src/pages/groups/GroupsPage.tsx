@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { useOrganizationScope } from "../../app/providers/OrganizationScopeProvider";
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
@@ -159,21 +160,25 @@ export function GroupsPage() {
 
       <div className="kpi-grid">
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows the number of admin-owned groups currently in scope." />
           <div className="metric-card__label">Groups</div>
           <div className="metric-card__value">{groups.length}</div>
           <div className="metric-card__trend">Admin-owned group records</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many groups are active and available for ongoing management." />
           <div className="metric-card__label">Active Groups</div>
           <div className="metric-card__value">{groups.filter((group) => group.is_active).length}</div>
           <div className="metric-card__trend">Currently enabled for management</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many organizations currently have at least one defined group." />
           <div className="metric-card__label">Organizations</div>
           <div className="metric-card__value">{new Set(groups.map((group) => group.tenant_id)).size}</div>
           <div className="metric-card__trend">Organizations with defined groups</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many groups already include descriptive setup context." />
           <div className="metric-card__label">Described Groups</div>
           <div className="metric-card__value">{groups.filter((group) => Boolean(group.profile?.description)).length}</div>
           <div className="metric-card__trend">Groups with setup context captured</div>
@@ -182,6 +187,7 @@ export function GroupsPage() {
 
       <div className="grid grid--two">
         <div className="panel stack">
+          <CardHelpTooltip text="Creates a new admin-owned group for an organization before or after activation." />
           <div>
             <h3 className="panel-title">Create Group</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -262,6 +268,7 @@ export function GroupsPage() {
         </div>
 
         <div className="panel stack">
+          <CardHelpTooltip text="Explains how groups support onboarding, structure, and delegated reporting scope inside the admin layer." />
           <div>
             <h3 className="panel-title">How Groups Fit</h3>
             <div className="muted" style={{ marginTop: 8 }}>
@@ -283,6 +290,7 @@ export function GroupsPage() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Provides searchable inventory for groups across organizations, including business unit, status, and update history." />
         <div className="filter-bar">
           <input
             className="search-input"
@@ -307,6 +315,7 @@ export function GroupsPage() {
         </div>
 
         <div className="table-card">
+          <CardHelpTooltip text="Shows the filtered group results for the current search and organization scope." />
           <div className="table-wrap">
             {filteredGroups.length === 0 ? (
               <div className="empty-state table-empty-state">

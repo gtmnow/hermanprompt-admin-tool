@@ -5,6 +5,7 @@ import { ArrowRight, Building2, CircleAlert, Rocket, ShieldCheck } from "lucide-
 import { Link } from "react-router-dom";
 
 import { useOrganizationScope } from "../../app/providers/OrganizationScopeProvider";
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { SimpleTrendChart } from "../../components/charts/SimpleTrendChart";
 import { StatusBadge } from "../../components/status/StatusBadge";
@@ -109,6 +110,7 @@ export function DashboardPage() {
 
       <div className="kpi-grid">
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many users are currently active inside the selected dashboard scope." />
           <div className="metric-card__label">Active Users</div>
           <div className="metric-card__value">{activeUsersKpi}</div>
           <div className="metric-card__trend">
@@ -116,16 +118,19 @@ export function DashboardPage() {
           </div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many organizations are included in the current dashboard view." />
           <div className="metric-card__label">Active Organizations</div>
           <div className="metric-card__value">{activeOrganizationCount}</div>
           <div className="metric-card__trend">{scopedTenants.length} total organizations in view</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows the average improvement between initial and final prompt scores for the selected reporting period." />
           <div className="metric-card__label">Avg Improvement</div>
           <div className="metric-card__value">{averageImprovementKpi}</div>
           <div className="metric-card__trend">Average delta from initial to final prompt score for {selectedRangeLabel.toLowerCase()}</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many authenticated users produced captured HermanPrompt session activity in the current range." />
           <div className="metric-card__label">Users In Session</div>
           <div className="metric-card__value">{sessionUserCount}</div>
           <div className="metric-card__trend">Authenticated users with captured HermanPrompt session activity</div>
@@ -157,6 +162,7 @@ export function DashboardPage() {
         <SimpleTrendChart
           title="Usage Trend"
           subtitle={`Captured HermanPrompt conversation activity for ${selectedRangeLabel.toLowerCase()}`}
+          tooltipText="Shows how usage volume changes over time for the current dashboard scope and date range."
           data={usageTrend}
           color="#0284C7"
           emptyMessage="Not enough recorded session activity in this period to draw a usage trend yet."
@@ -164,6 +170,7 @@ export function DashboardPage() {
         <SimpleTrendChart
           title="Improvement Trend"
           subtitle={`Average delta from initial to final prompt score across ${selectedScopeLabel}`}
+          tooltipText="Shows whether prompt quality improvement is rising, flattening, or falling over the selected period."
           data={improvementTrend}
           emptyMessage="No scored sessions were found in this reporting window, so improvement is not plotted yet."
         />
@@ -171,6 +178,7 @@ export function DashboardPage() {
 
       <div className="grid grid--two">
         <div className="panel">
+          <CardHelpTooltip text="Highlights the highest-priority issues in the current scope that may need operator follow-up." />
           <div className="split-header">
             <div>
               <h3 className="panel-title">Alerts</h3>
@@ -193,6 +201,7 @@ export function DashboardPage() {
         </div>
 
         <div className="panel">
+          <CardHelpTooltip text="Surfaces the most common next-step workflows from the dashboard." />
           <div className="split-header">
             <div>
               <h3 className="panel-title">Quick Actions</h3>
@@ -223,6 +232,7 @@ export function DashboardPage() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Summarizes onboarding progress and readiness signals pulled from the current backend onboarding records." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">Onboarding Snapshot</h3>

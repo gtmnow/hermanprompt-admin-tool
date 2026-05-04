@@ -181,6 +181,7 @@ button {
   border: 1px solid rgba(226, 232, 240, 0.9);
   border-radius: 26px;
   box-shadow: var(--shadow-card);
+  position: relative;
 }
 
 .panel {
@@ -489,6 +490,59 @@ button {
   font-size: 18px;
   font-weight: 700;
   color: var(--text-strong);
+}
+
+.card-help {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 2;
+}
+
+.card-help__trigger {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text-muted);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+}
+
+.card-help__trigger:hover,
+.card-help__trigger:focus-visible {
+  color: var(--accent-dark);
+  border-color: rgba(2, 132, 199, 0.4);
+  outline: none;
+}
+
+.card-help__bubble {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(280px, 58vw);
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.96);
+  color: white;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.24);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.card-help:hover .card-help__bubble,
+.card-help:focus-within .card-help__bubble {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .muted {
@@ -939,6 +993,7 @@ button {
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.16);
+  position: relative;
 }
 
 .users-page__dialog {

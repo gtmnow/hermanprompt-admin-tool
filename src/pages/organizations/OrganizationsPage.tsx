@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
@@ -54,6 +55,7 @@ export function OrganizationsPage() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Filters and lists organizations in your current scope so admins can review status, profile completeness, user counts, and service setup at a glance." />
         <div className="filter-bar">
           <input
             className="search-input"
@@ -73,6 +75,7 @@ export function OrganizationsPage() {
         </div>
 
         <div className="table-card">
+          <CardHelpTooltip text="Shows the filtered organization inventory with each tenant's status, profile summary, active user count, LLM readiness, plan, and latest update timestamp." />
           <div className="table-wrap">
             <table className="data-table">
               <thead>

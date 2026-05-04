@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
+import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
@@ -139,21 +140,25 @@ export function OperationsPage() {
 
       <div className="kpi-grid">
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many tenants are included in the current operational scope." />
           <div className="metric-card__label">Tenants</div>
           <div className="metric-card__value">{systemOverview?.tenant_count ?? tenants.length}</div>
           <div className="metric-card__trend">Visible in current operational scope</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many tenants currently have invalid runtime credentials and may need intervention." />
           <div className="metric-card__label">Invalid Credentials</div>
           <div className="metric-card__value">{systemOverview?.invalid_credential_count ?? 0}</div>
           <div className="metric-card__trend">Require runtime attention</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows how many onboarding records are still in progress and may be blocked or delayed." />
           <div className="metric-card__label">Stalled Onboarding</div>
           <div className="metric-card__value">{systemOverview?.stalled_onboarding_count ?? 0}</div>
           <div className="metric-card__trend">In-progress tenants needing follow-up</div>
         </div>
         <div className="card metric-card">
+          <CardHelpTooltip text="Shows the number of export jobs that are queued or failed and may need operational follow-up." />
           <div className="metric-card__label">Open Export Jobs</div>
           <div className="metric-card__value">{failedOrQueuedExports.length}</div>
           <div className="metric-card__trend">Queued or failed artifacts</div>
@@ -161,6 +166,7 @@ export function OperationsPage() {
       </div>
 
       <div className="panel stack">
+        <CardHelpTooltip text="Lets admins narrow the issue queue and audit activity to a partner, tenant, or target type." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">Investigation Filters</h3>
@@ -210,6 +216,7 @@ export function OperationsPage() {
 
       <div className="grid grid--two">
         <div className="panel">
+          <CardHelpTooltip text="Lists tenants with setup, onboarding, or LLM issues so admins can investigate the next best action." />
           <div className="split-header">
             <div>
               <h3 className="panel-title">Issue Queue</h3>
@@ -256,6 +263,7 @@ export function OperationsPage() {
         </div>
 
         <div className="panel">
+          <CardHelpTooltip text="Shows recent audit events in the current scope to support compliance review and troubleshooting." />
           <div className="split-header">
             <div>
               <h3 className="panel-title">Recent Audit Activity</h3>
@@ -292,6 +300,7 @@ export function OperationsPage() {
       </div>
 
       <div className="panel">
+        <CardHelpTooltip text="Shows recent export job outcomes, artifact availability, and diagnostic status for operations teams." />
         <div className="split-header">
           <div>
             <h3 className="panel-title">Export Job Diagnostics</h3>
