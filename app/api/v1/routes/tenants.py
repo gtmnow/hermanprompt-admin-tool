@@ -36,7 +36,6 @@ from app.secret_vault import resolve_secret_reference, store_managed_secret
 from app.services import (
     apply_reseller_defaults_to_tenant,
     delete_tenant_and_users,
-    ensure_additive_schema_extensions,
     ensure_scope_access,
     generate_tenant_key,
     get_service_tier_or_404,
@@ -226,7 +225,6 @@ def list_tenants(
     principal: Principal = Depends(require_permission("tenants.read")),
     db: Session = Depends(get_db),
 ) -> ListEnvelope[TenantSummary]:
-    ensure_additive_schema_extensions()
     if not table_exists(db, "tenants"):
         items = [snapshot_summary(db, snapshot_tenant_id) for snapshot_tenant_id in get_snapshot_tenant_ids(db)]
         return ListEnvelope[TenantSummary](
@@ -282,7 +280,6 @@ def create_tenant(
     principal: Principal = Depends(require_permission("tenants.create")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantSummary]:
-    ensure_additive_schema_extensions()
     payload_data = payload.model_dump(mode="json")
     reseller_defaults = None
     if payload.reseller_partner_id:
@@ -350,7 +347,6 @@ def run_tenant_lifecycle_action(
     principal: Principal = Depends(require_permission("tenants.write")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantLifecycleActionResult]:
-    ensure_additive_schema_extensions()
     tenant = db.get(Tenant, tenant_id)
     if tenant is None:
         if payload.action == "delete":
@@ -441,7 +437,6 @@ def get_portal_config(
     principal: Principal = Depends(require_permission("tenants.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantPortalConfigSchema]:
-    ensure_additive_schema_extensions()
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
     resource = to_portal_schema(tenant)
@@ -457,7 +452,6 @@ def update_portal_config(
     principal: Principal = Depends(require_permission("tenants.write")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantPortalConfigSchema]:
-    ensure_additive_schema_extensions()
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
     before = serialize_model(tenant.portal_config) if tenant.portal_config is not None else None
@@ -494,7 +488,6 @@ def get_tenant(
     principal: Principal = Depends(require_permission("tenants.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantSummary]:
-    ensure_additive_schema_extensions()
     if not table_exists(db, "tenants"):
         for item in [snapshot_summary(db, snapshot_tenant_id) for snapshot_tenant_id in get_snapshot_tenant_ids(db)]:
             if str(item.tenant.id) == tenant_id:
@@ -514,7 +507,6 @@ def update_tenant(
     principal: Principal = Depends(require_permission("tenants.write")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantSummary]:
-    ensure_additive_schema_extensions()
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
     before = serialize_model(tenant)
@@ -619,7 +611,6 @@ def get_llm_config(
     principal: Principal = Depends(require_permission("runtime.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantLLMConfigSchema | None]:
-    ensure_additive_schema_extensions()
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
     return ResourceEnvelope[TenantLLMConfigSchema | None](resource=to_llm_schema(tenant.llm_config), updated_at=tenant.updated_at)
@@ -633,7 +624,6 @@ def upsert_llm_config(
     principal: Principal = Depends(require_permission("runtime.write")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantLLMConfigSchema]:
-    ensure_additive_schema_extensions()
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
 
@@ -720,7 +710,6 @@ def validate_llm_config(
     principal: Principal = Depends(require_permission("runtime.validate")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantValidationResult]:
-    ensure_additive_schema_extensions()
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
     llm_config = tenant.llm_config
@@ -803,7 +792,6 @@ def get_runtime_settings(
     principal: Principal = Depends(require_permission("runtime.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantRuntimeSettingsSchema]:
-    ensure_additive_schema_extensions()
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
     if tenant.runtime_settings is None:
@@ -825,7 +813,6 @@ def update_runtime_settings(
     principal: Principal = Depends(require_permission("runtime.write")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[TenantRuntimeSettingsSchema]:
-    ensure_additive_schema_extensions()
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
     runtime_settings = tenant.runtime_settings or TenantRuntimeSettings(tenant_id=tenant.id)

@@ -1234,7 +1234,6 @@ def get_snapshot_users(db: Session, tenant: Tenant | None = None) -> list[dict[s
               a.email,
               a.display_name,
               a.is_active,
-              a.is_admin,
               a.created_at,
               a.updated_at,
               a.last_login_at,
@@ -1283,7 +1282,6 @@ def get_auth_users(db: Session, user_id_hash: str | None = None) -> list[dict[st
               a.email,
               a.display_name,
               a.is_active,
-              a.is_admin,
               a.created_at,
               a.updated_at,
               a.last_login_at,
@@ -1311,6 +1309,139 @@ def get_auth_users(db: Session, user_id_hash: str | None = None) -> list[dict[st
         params,
     ).mappings().all()
     return [dict(row) for row in rows]
+
+
+def get_auth_user_identity(db: Session, *, user_id_hash: str) -> dict[str, object] | None:
+    row = db.execute(
+        text(
+            """
+            select
+              user_id_hash,
+              email,
+              display_name
+            from auth_users
+            where user_id_hash = :user_id_hash
+            order by updated_at desc, created_at desc, id desc
+            limit 1
+            """
+        ),
+        {"user_id_hash": user_id_hash},
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+def sync_auth_user_admin_authority(db: Session, *, user_id_hash: str) -> bool:
+    existing = get_auth_user_identity(db, user_id_hash=user_id_hash)
+    if existing is None:
+        return False
+
+    has_active_admin_assignment = db.scalar(
+        select(AdminUser.id).where(
+            AdminUser.user_id_hash == user_id_hash,
+            AdminUser.is_active.is_(True),
+        )
+    ) is not None
+    db.execute(
+        text(
+            """
+            update auth_users
+            set
+              is_admin = :is_admin,
+              updated_at = :updated_at
+            where user_id_hash = :user_id_hash
+            """
+        ),
+        {
+            "user_id_hash": user_id_hash,
+            "is_admin": has_active_admin_assignment,
+            "updated_at": datetime.utcnow(),
+        },
+    )
+    return True
+
+
+def sync_admin_identity_to_auth_user(
+    db: Session,
+    *,
+    user_id_hash: str,
+    email: str | None = None,
+    display_name: str | None = None,
+) -> bool:
+    if email is None and display_name is None:
+        return False
+
+    existing = get_auth_user_identity(db, user_id_hash=user_id_hash)
+    if existing is None:
+        return False
+
+    normalized_email = normalize_email(email) if email is not None else None
+    if email is not None and normalized_email is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
+
+    if normalized_email is not None:
+        conflicting_user = db.execute(
+            text(
+                """
+                select id
+                from auth_users
+                where lower(email) = :email
+                  and user_id_hash != :user_id_hash
+                order by id desc
+                limit 1
+                """
+            ),
+            {"email": normalized_email, "user_id_hash": user_id_hash},
+        ).scalar_one_or_none()
+        if conflicting_user is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email is already assigned to a different auth user",
+            )
+
+    db.execute(
+        text(
+            """
+            update auth_users
+            set
+              email = :email,
+              display_name = :display_name,
+              is_admin = :is_admin,
+              updated_at = :updated_at
+            where user_id_hash = :user_id_hash
+            """
+        ),
+        {
+            "user_id_hash": user_id_hash,
+            "email": normalized_email if normalized_email is not None else existing.get("email"),
+            "display_name": display_name if display_name is not None else existing.get("display_name"),
+            "is_admin": db.scalar(
+                select(AdminUser.id).where(
+                    AdminUser.user_id_hash == user_id_hash,
+                    AdminUser.is_active.is_(True),
+                )
+            )
+            is not None,
+            "updated_at": datetime.utcnow(),
+        },
+    )
+    return True
+
+
+def resolve_admin_profile_summary(db: Session, admin: AdminUser) -> dict[str, str | None] | None:
+    auth_identity = get_auth_user_identity(db, user_id_hash=admin.user_id_hash)
+    if auth_identity is not None:
+        return {
+            "display_name": str(auth_identity["display_name"]) if auth_identity.get("display_name") is not None else None,
+            "email": str(auth_identity["email"]) if auth_identity.get("email") is not None else None,
+        }
+
+    if admin.profile is not None:
+        return {
+            "display_name": admin.profile.display_name,
+            "email": admin.profile.email,
+        }
+
+    return None
 
 
 def upsert_auth_user(
@@ -1349,7 +1480,13 @@ def upsert_auth_user(
         )
 
     existing = existing_by_user or existing_by_email
-    resolved_is_admin = bool(existing["is_admin"]) if existing and is_admin is None else bool(is_admin)
+    authoritative_admin_assignment = db.scalar(
+        select(AdminUser.id).where(
+            AdminUser.user_id_hash == user_id_hash,
+            AdminUser.is_active.is_(True),
+        )
+    ) is not None
+    resolved_is_admin = authoritative_admin_assignment if is_admin is None else bool(is_admin)
     now = datetime.utcnow()
     credentials_table_exists = has_auth_user_credentials_table(db)
     legacy_password_columns = auth_users_has_legacy_password_columns(db)

@@ -15,7 +15,7 @@ from app.auth import (
 )
 from app.core.config import get_settings
 from app.db import get_db
-from app.models import AdminProfile, AdminUser
+from app.models import AdminUser
 from app.schemas.auth import (
     AdminSessionSummary,
     AuthenticatedAdminPrincipal,
@@ -24,6 +24,7 @@ from app.schemas.auth import (
     LogoutResponse,
 )
 from app.security import Principal, build_principal_for_admin, get_current_principal
+from app.services import resolve_admin_profile_summary
 
 router = APIRouter()
 
@@ -32,7 +33,8 @@ def _build_auth_response(db: Session, principal: Principal, session_id: str) -> 
     session = resolve_active_admin_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired admin session")
-    profile = db.scalar(select(AdminProfile).where(AdminProfile.admin_user_id == principal.admin_id))
+    admin = db.scalar(select(AdminUser).where(AdminUser.id == principal.admin_id))
+    profile = resolve_admin_profile_summary(db, admin) if admin is not None else None
     return AuthSessionResponse(
         principal=AuthenticatedAdminPrincipal(
             admin_id=principal.admin_id,
@@ -50,12 +52,7 @@ def _build_auth_response(db: Session, principal: Principal, session_id: str) -> 
                 }
                 for scope in principal.scopes
             ],
-            profile={
-                "display_name": profile.display_name if profile else None,
-                "email": profile.email if profile else None,
-            }
-            if profile
-            else None,
+            profile=profile,
         ),
         session=AdminSessionSummary(
             session_id=session.id,

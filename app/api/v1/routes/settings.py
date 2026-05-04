@@ -32,7 +32,7 @@ from app.schemas import (
 )
 from app.security import Principal, require_permission, require_super_admin
 from app.secret_vault import get_vault_status, mask_connection_string, resolve_secret_reference, store_managed_secret
-from app.services import ensure_additive_schema_extensions, serialize_model, validate_reseller_capacity, write_audit_log
+from app.services import serialize_model, validate_reseller_capacity, write_audit_log
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -73,7 +73,6 @@ def list_service_tiers(
     principal: Principal = Depends(require_permission("tenants.read")),
     db: Session = Depends(get_db),
 ) -> ListEnvelope[ServiceTierDefinitionSummary]:
-    ensure_additive_schema_extensions()
     query = select(ServiceTierDefinition).order_by(
         ServiceTierDefinition.scope_type.asc(),
         ServiceTierDefinition.sort_order.asc(),
@@ -103,7 +102,6 @@ def create_service_tier(
     principal: Principal = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[ServiceTierDefinitionSummary]:
-    ensure_additive_schema_extensions()
     existing = db.scalar(
         select(ServiceTierDefinition).where(
             ServiceTierDefinition.scope_type == payload.scope_type,
@@ -137,7 +135,6 @@ def update_service_tier(
     principal: Principal = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[ServiceTierDefinitionSummary]:
-    ensure_additive_schema_extensions()
     record = db.get(ServiceTierDefinition, tier_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service tier not found")
@@ -176,7 +173,6 @@ def delete_service_tier(
     principal: Principal = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[ServiceTierDefinitionSummary]:
-    ensure_additive_schema_extensions()
     record = db.get(ServiceTierDefinition, tier_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service tier not found")
@@ -236,7 +232,6 @@ def get_secret_vault(
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[SecretVaultStatusSummary]:
     _ = principal
-    ensure_additive_schema_extensions()
     status_summary = SecretVaultStatusSummary.model_validate(get_vault_status(db), from_attributes=True)
     return ResourceEnvelope[SecretVaultStatusSummary](resource=status_summary)
 
@@ -246,7 +241,6 @@ def get_runtime_database_target(
     principal: Principal = Depends(require_permission("system_health.read")),
 ) -> ResourceEnvelope[RuntimeDatabaseTargetSummary]:
     _ = principal
-    ensure_additive_schema_extensions()
     summary = get_runtime_database_target_summary()
     return ResourceEnvelope[RuntimeDatabaseTargetSummary](resource=summary)
 
@@ -257,7 +251,6 @@ def list_platform_managed_llms(
     principal: Principal = Depends(require_permission("runtime.read")),
     db: Session = Depends(get_db),
 ) -> ListEnvelope[PlatformManagedLlmConfigSummary]:
-    ensure_additive_schema_extensions()
     query = select(PlatformManagedLlmConfig).order_by(
         PlatformManagedLlmConfig.is_active.desc(),
         PlatformManagedLlmConfig.created_at.desc(),
@@ -286,7 +279,6 @@ def test_platform_managed_llm(
 ) -> ResourceEnvelope[PlatformManagedLlmConfigTestResult]:
     _ = principal
     _ = db
-    ensure_additive_schema_extensions()
     result = test_platform_llm_connection(payload)
     return ResourceEnvelope[PlatformManagedLlmConfigTestResult](resource=result)
 
@@ -298,7 +290,6 @@ def create_platform_managed_llm(
     principal: Principal = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[PlatformManagedLlmConfigSummary]:
-    ensure_additive_schema_extensions()
     payload_data = payload.model_dump(exclude_none=True)
     api_key = payload_data.pop("api_key", None)
     secret_reference = payload_data.pop("secret_reference", None)
@@ -467,7 +458,6 @@ def update_platform_managed_llm(
     principal: Principal = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[PlatformManagedLlmConfigSummary]:
-    ensure_additive_schema_extensions()
     record = db.get(PlatformManagedLlmConfig, config_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Platform managed LLM config not found")
@@ -542,7 +532,6 @@ def delete_platform_managed_llm(
     principal: Principal = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[PlatformManagedLlmConfigSummary]:
-    ensure_additive_schema_extensions()
     record = db.get(PlatformManagedLlmConfig, config_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Platform managed LLM config not found")
@@ -581,7 +570,6 @@ def list_database_instances(
     db: Session = Depends(get_db),
 ) -> ListEnvelope[DatabaseInstanceConfigSummary]:
     _ = principal
-    ensure_additive_schema_extensions()
     items = [
         DatabaseInstanceConfigSummary.model_validate(item, from_attributes=True)
         for item in db.scalars(select(DatabaseInstanceConfig).order_by(DatabaseInstanceConfig.created_at.desc()))
@@ -602,7 +590,6 @@ def create_database_instance(
     principal: Principal = Depends(require_permission("system_health.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[DatabaseInstanceConfigSummary]:
-    ensure_additive_schema_extensions()
     if payload.is_active:
         for item in db.scalars(select(DatabaseInstanceConfig).where(DatabaseInstanceConfig.is_active.is_(True))):
             item.is_active = False
@@ -662,7 +649,6 @@ def update_database_instance(
     principal: Principal = Depends(require_permission("system_health.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[DatabaseInstanceConfigSummary]:
-    ensure_additive_schema_extensions()
     record = db.get(DatabaseInstanceConfig, instance_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Database instance not found")
@@ -722,7 +708,6 @@ def list_prompt_ui_instances(
     db: Session = Depends(get_db),
 ) -> ListEnvelope[PromptUiInstanceConfigSummary]:
     _ = principal
-    ensure_additive_schema_extensions()
     items = [
         PromptUiInstanceConfigSummary.model_validate(item, from_attributes=True)
         for item in db.scalars(select(PromptUiInstanceConfig).order_by(PromptUiInstanceConfig.created_at.desc()))
@@ -743,7 +728,6 @@ def create_prompt_ui_instance(
     principal: Principal = Depends(require_permission("system_health.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[PromptUiInstanceConfigSummary]:
-    ensure_additive_schema_extensions()
     if payload.is_active:
         for item in db.scalars(select(PromptUiInstanceConfig).where(PromptUiInstanceConfig.is_active.is_(True))):
             item.is_active = False
@@ -776,7 +760,6 @@ def update_prompt_ui_instance(
     principal: Principal = Depends(require_permission("system_health.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[PromptUiInstanceConfigSummary]:
-    ensure_additive_schema_extensions()
     record = db.get(PromptUiInstanceConfig, instance_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt UI instance not found")

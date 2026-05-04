@@ -322,6 +322,7 @@ def auth_row_to_summary(
         if membership is not None
         else []
     )
+    admin_role = build_admin_role_summary(db, row_user_id_hash)
     profile = membership.profile if membership else None
     invitation = latest_invitation_for_user(db, row_user_id_hash, tenant_id)
     membership_status = membership.status if membership is not None else ("active" if bool(row.get("is_active")) else "inactive")
@@ -342,7 +343,7 @@ def auth_row_to_summary(
             first_name=profile.first_name if profile and profile.first_name is not None else first_name,
             last_name=profile.last_name if profile and profile.last_name is not None else last_name,
             email=string_value(row.get("email")) if row.get("email") else profile.email if profile else None,
-            title=profile.title if profile and profile.title is not None else ("Admin" if bool(row.get("is_admin")) else "Member"),
+            title=profile.title if profile and profile.title is not None else ("Admin" if admin_role is not None else "Member"),
             initial_user_type=profile.initial_user_type if profile and profile.initial_user_type is not None else None,
             utilization_level=profile.utilization_level if profile and profile.utilization_level is not None else utilization_level,
             sessions_count=sessions_count,
@@ -355,7 +356,7 @@ def auth_row_to_summary(
         ),
         status_summary=build_status_summary(membership_status, row, invitation),
         invitation_summary=build_invitation_summary(invitation),
-        admin_role=build_admin_role_summary(db, row_user_id_hash),
+        admin_role=admin_role,
         detail_sections=build_detail_sections(db, row_user_id_hash) if include_detail_sections else [],
     )
 
@@ -561,7 +562,7 @@ def auth_row_to_list_summary(
             first_name=profile.first_name if profile and profile.first_name is not None else first_name,
             last_name=profile.last_name if profile and profile.last_name is not None else last_name,
             email=string_value(row.get("email")) if row.get("email") else profile.email if profile else None,
-            title=profile.title if profile and profile.title is not None else ("Admin" if bool(row.get("is_admin")) else "Member"),
+            title=profile.title if profile and profile.title is not None else ("Admin" if admin_role is not None else "Member"),
             initial_user_type=profile.initial_user_type if profile and profile.initial_user_type is not None else None,
             utilization_level=profile.utilization_level if profile and profile.utilization_level is not None else utilization_level,
             sessions_count=sessions_count,
