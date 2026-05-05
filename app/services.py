@@ -454,20 +454,23 @@ def _build_onboarding_status_snapshot(
     onboarding.groups_created = group_count > 0
     onboarding.users_uploaded = user_count > 0
     onboarding.admin_assigned = admin_count > 0
-    try:
-        knowledge_counts = db.execute(
-            text(
-                """
-                select
-                  count(*) as total_docs,
-                  count(*) filter (where status = 'ready') as ready_docs
-                from rag_documents
-                where tenant_id = :tenant_id and scope_type = 'tenant'
-                """
-            ),
-            {"tenant_id": tenant_id},
-        ).mappings().first()
-    except Exception:
+    if table_exists(db, "rag_documents"):
+        try:
+            knowledge_counts = db.execute(
+                text(
+                    """
+                    select
+                      count(*) as total_docs,
+                      count(*) filter (where status = 'ready') as ready_docs
+                    from rag_documents
+                    where tenant_id = :tenant_id and scope_type = 'tenant'
+                    """
+                ),
+                {"tenant_id": tenant_id},
+            ).mappings().first()
+        except Exception:
+            knowledge_counts = None
+    else:
         knowledge_counts = None
     onboarding.knowledge_configured = bool((knowledge_counts or {}).get("total_docs", 0))
     onboarding.knowledge_ready = bool((knowledge_counts or {}).get("ready_docs", 0))
