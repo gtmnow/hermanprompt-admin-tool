@@ -255,6 +255,7 @@ export function ActivationWizardPage() {
   const [secretSelection, setSecretSelection] = useState<SecretSelection>("local_storage");
   const [invitePromptUsers, setInvitePromptUsers] = useState<UserMembership[]>([]);
   const [userLimitDialog, setUserLimitDialog] = useState<UserLimitDialogState | null>(null);
+  const [activationSuccessMessage, setActivationSuccessMessage] = useState<string | null>(null);
   const lastAppliedResellerDefaultsId = useRef<string | null>(null);
 
   function advanceToNextStep() {
@@ -626,9 +627,9 @@ export function ActivationWizardPage() {
 
   const activateTenantMutation = useMutation({
     mutationFn: () => tenantApi.activateTenant(tenantId ?? ""),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["activation-tenant", tenantId] });
-      queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["activation-tenant", tenantId] });
+      await queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
     },
   });
 
@@ -740,6 +741,34 @@ export function ActivationWizardPage() {
       return;
     }
     inviteUsersMutation.mutate(invitePromptUsers);
+  }
+
+  async function handleActivateOrganization() {
+    if (!tenantId) {
+      return;
+    }
+
+    setActivationSuccessMessage(null);
+    const result = await activateTenantMutation.mutateAsync();
+    const [tenantRefresh, onboardingRefresh] = await Promise.all([
+      tenantQuery.refetch(),
+      onboardingQuery.refetch(),
+    ]);
+    const activatedTenant = tenantRefresh.data?.resource ?? result.resource;
+    const refreshedOnboarding = onboardingRefresh.data?.resource ?? onboardingQuery.data?.resource ?? null;
+
+    if (activatedTenant.tenant.status !== "active") {
+      throw new Error("Activation did not complete successfully. The organization is not marked active yet.");
+    }
+
+    if (refreshedOnboarding?.onboarding_status === "live") {
+      setActivationSuccessMessage("Activation successful. The organization is now live and ready for use.");
+      return;
+    }
+
+    setActivationSuccessMessage(
+      `Activation successful. The organization is now active${refreshedOnboarding ? ` and onboarding is currently ${refreshedOnboarding.onboarding_status}.` : "."}`,
+    );
   }
 
   function requestUserCreation(kind: "single" | "bulk", requestedUsers: number) {
@@ -1886,6 +1915,11 @@ export function ActivationWizardPage() {
                     {form.watch("service_mode") || activeTenant?.profile?.service_mode || "Managed service"} allows phased rollout, so LLM validation is optional for the first activation.
                   </div>
                 ) : null}
+                {activationSuccessMessage ? (
+                  <div className="section-note section-note--success">
+                    {activationSuccessMessage}
+                  </div>
+                ) : null}
                 <div className="section-note">
                   Activation remains a DB-state change only. This admin tool records the configuration and readiness markers in the database and does not drive HermanPrompt or Herman Transform directly.
                 </div>
@@ -1904,7 +1938,9 @@ export function ActivationWizardPage() {
                 <button
                   className="primary-button"
                   disabled={!tenantId || onboardingBlockers.length > 0 || activateTenantMutation.isPending}
-                  onClick={() => activateTenantMutation.mutate()}
+                  onClick={() => {
+                    void handleActivateOrganization();
+                  }}
                   type="button"
                 >
                   {activateTenantMutation.isPending ? "Activating..." : "Activate organization"}
