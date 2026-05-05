@@ -44,7 +44,7 @@ from app.models import (
 from app.security import Principal
 
 AUTH_USER_DISABLED_PASSWORD_HASH = "$2y$12$meGFiGyYM5aRO0bDJmpuN.gfvgLNTF/5lk/qgIiSI1/DHuy9XNoQS"
-FOUNDATIONAL_PROFILE_TABLES = ("type_detail", "final_profile")
+FOUNDATIONAL_PROFILE_TABLES = ("type_detail",)
 FOUNDATIONAL_PROFILE_FIELDS = (
     "structure",
     "answer_first",
@@ -1652,6 +1652,86 @@ def foundational_profile_for_user_type(initial_user_type: int) -> dict[str, floa
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid initial user type") from exc
 
 
+def upsert_effective_profile_from_foundational(
+    db: Session,
+    *,
+    user_id_hash: str,
+) -> None:
+    required_tables = ("type_detail", "final_profile")
+    if any(not table_exists(db, table_name) for table_name in required_tables):
+        return
+
+    db.execute(
+        text(
+            """
+            INSERT INTO final_profile (
+              user_id_hash,
+              structure,
+              answer_first,
+              tone_directness,
+              detail_level,
+              ambiguity_reduction,
+              exploration_level,
+              context_loading,
+              prompt_enforcement_level,
+              compliance_check_enabled,
+              pii_check_enabled,
+              profile_version,
+              updated_at
+            )
+            SELECT
+              t.user_id_hash,
+              coalesce(ba.structure, ed.structure, bc.structure, t.structure) AS structure,
+              coalesce(ba.answer_first, ed.answer_first, bc.answer_first, t.answer_first) AS answer_first,
+              coalesce(ba.tone_directness, ed.tone_directness, bc.tone_directness, t.tone_directness) AS tone_directness,
+              coalesce(ba.detail_level, ed.detail_level, bc.detail_level, t.detail_level) AS detail_level,
+              coalesce(ba.ambiguity_reduction, ed.ambiguity_reduction, bc.ambiguity_reduction, t.ambiguity_reduction) AS ambiguity_reduction,
+              coalesce(ba.exploration_level, ed.exploration_level, bc.exploration_level, t.exploration_level) AS exploration_level,
+              coalesce(ba.context_loading, ed.context_loading, bc.context_loading, t.context_loading) AS context_loading,
+              coalesce(ba.prompt_enforcement_level, ed.prompt_enforcement_level, bc.prompt_enforcement_level, t.prompt_enforcement_level) AS prompt_enforcement_level,
+              coalesce(ba.compliance_check_enabled, ed.compliance_check_enabled, bc.compliance_check_enabled, t.compliance_check_enabled) AS compliance_check_enabled,
+              coalesce(ba.pii_check_enabled, ed.pii_check_enabled, bc.pii_check_enabled, t.pii_check_enabled) AS pii_check_enabled,
+              CASE
+                WHEN bc.user_id_hash IS NOT NULL
+                  OR ed.user_id_hash IS NOT NULL
+                  OR ba.user_id_hash IS NOT NULL
+                THEN left(coalesce(nullif(t.profile_version, ''), 'type_detail') || '+layers', 50)
+                ELSE t.profile_version
+              END AS profile_version,
+              greatest(
+                coalesce(t.updated_at, CURRENT_TIMESTAMP),
+                coalesce(bc.updated_at, t.updated_at, CURRENT_TIMESTAMP),
+                coalesce(ed.updated_at, t.updated_at, CURRENT_TIMESTAMP),
+                coalesce(ba.updated_at, t.updated_at, CURRENT_TIMESTAMP)
+              ) AS updated_at
+            FROM type_detail AS t
+            LEFT JOIN brain_chemistry AS bc
+              ON bc.user_id_hash = t.user_id_hash
+            LEFT JOIN environment_details AS ed
+              ON ed.user_id_hash = t.user_id_hash
+            LEFT JOIN behaviorial_adj AS ba
+              ON ba.user_id_hash = t.user_id_hash
+            WHERE t.user_id_hash = :user_id_hash
+            ON CONFLICT (user_id_hash) DO UPDATE
+            SET
+              structure = excluded.structure,
+              answer_first = excluded.answer_first,
+              tone_directness = excluded.tone_directness,
+              detail_level = excluded.detail_level,
+              ambiguity_reduction = excluded.ambiguity_reduction,
+              exploration_level = excluded.exploration_level,
+              context_loading = excluded.context_loading,
+              prompt_enforcement_level = excluded.prompt_enforcement_level,
+              compliance_check_enabled = excluded.compliance_check_enabled,
+              pii_check_enabled = excluded.pii_check_enabled,
+              profile_version = excluded.profile_version,
+              updated_at = excluded.updated_at
+            """
+        ),
+        {"user_id_hash": user_id_hash},
+    )
+
+
 def seed_foundational_profile(
     db: Session,
     *,
@@ -1731,6 +1811,8 @@ def seed_foundational_profile(
                 ),
                 payload,
             )
+
+    upsert_effective_profile_from_foundational(db, user_id_hash=user_id_hash)
 
 
 def ensure_deactivated_users_tenant(db: Session) -> Tenant:

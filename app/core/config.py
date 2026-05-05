@@ -53,7 +53,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HERMAN_DB_VERSION_TABLE"),
     )
     herman_db_allowed_revisions_raw: str = Field(
-        default="20260504_0006,20260504_0007,20260504_0008,20260504_0009,20260505_0010",
+        default="20260504_0006,20260504_0007,20260504_0008,20260504_0009,20260505_0010,20260505_0011",
         validation_alias=AliasChoices("HERMAN_DB_ALLOWED_REVISIONS"),
     )
     launch_secret: str = Field(
