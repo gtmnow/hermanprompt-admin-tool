@@ -37,6 +37,7 @@ from app.services import (
     refresh_onboarding_state,
     seed_foundational_profile,
     serialize_model,
+    sync_auth_user_primary_tenant,
     get_user_detail_sections,
     table_exists,
     upsert_auth_user,
@@ -934,6 +935,7 @@ def update_user_membership(
     if payload.status is not None:
         membership.status = payload.status
     membership.is_primary = True
+    sync_auth_user_primary_tenant(db, user_id_hash=user_id_hash, fallback_tenant_id=tenant.id)
     if payload.group_ids is not None:
         db.execute(delete(UserGroupMembership).where(UserGroupMembership.tenant_membership_id == membership.id))
         for group_id in payload.group_ids:

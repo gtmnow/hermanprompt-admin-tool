@@ -1460,7 +1460,11 @@ def upsert_auth_user(
     if normalized_email is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
 
-    auth_tenant_id = preferred_auth_tenant_id(tenant)
+    auth_tenant_id = resolve_auth_user_primary_tenant_id(
+        db,
+        user_id_hash=user_id_hash,
+        fallback_tenant_id=preferred_auth_tenant_id(tenant),
+    )
     resolved_display_name = build_display_name(first_name, last_name, display_name) or normalized_email
     desired_is_active = status == "active"
 
@@ -1607,6 +1611,65 @@ def upsert_auth_user(
         {"user_id_hash": user_id_hash},
     ).mappings().first()
     return dict(row) if row else {}
+
+
+def resolve_auth_user_primary_tenant_id(
+    db: Session,
+    *,
+    user_id_hash: str,
+    fallback_tenant_id: str | None = None,
+) -> str | None:
+    if table_exists(db, "user_tenant_membership"):
+        tenant_id = db.execute(
+            text(
+                """
+                select tenant_id
+                from user_tenant_membership
+                where user_id_hash = :user_id_hash
+                  and is_primary = true
+                  and status != 'deleted'
+                order by updated_at desc, created_at desc
+                limit 1
+                """
+            ),
+            {"user_id_hash": user_id_hash},
+        ).scalar_one_or_none()
+        if tenant_id is not None:
+            return str(tenant_id)
+    return fallback_tenant_id
+
+
+def sync_auth_user_primary_tenant(
+    db: Session,
+    *,
+    user_id_hash: str,
+    fallback_tenant_id: str | None = None,
+) -> None:
+    resolved_tenant_id = resolve_auth_user_primary_tenant_id(
+        db,
+        user_id_hash=user_id_hash,
+        fallback_tenant_id=fallback_tenant_id,
+    )
+    if resolved_tenant_id is None or not table_exists(db, "auth_users"):
+        return
+
+    db.execute(
+        text(
+            """
+            update auth_users
+            set
+              tenant_id = :tenant_id,
+              updated_at = :updated_at
+            where user_id_hash = :user_id_hash
+              and coalesce(tenant_id, '') <> :tenant_id
+            """
+        ),
+        {
+            "tenant_id": resolved_tenant_id,
+            "updated_at": datetime.utcnow(),
+            "user_id_hash": user_id_hash,
+        },
+    )
 
 
 def get_canonical_user_id_hash(
