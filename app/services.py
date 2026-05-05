@@ -2699,18 +2699,20 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
                 ).scalar()
                 or 0
             )
-            session_user_count = int(
+            session_count = int(
                 db.execute(
                     text(
                         """
-                        select count(distinct a.user_id_hash)
+                        select count(*)
                         from auth_users a
                         join conversations c on c.user_id_hash = a.user_id_hash
                         where a.tenant_id = :tenant_id
                           and a.is_active
+                          and {time_predicate}
                         """
+                        .format(time_predicate=timestamp_predicate.format(column="c.created_at"))
                     ),
-                    {"tenant_id": snapshot_tenant_id},
+                    params,
                 ).scalar()
                 or 0
             )
@@ -2771,16 +2773,19 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
             ).mappings().all()
         elif scope_type == "global":
             active_users = int(db.execute(text("select count(*) from auth_users where is_active")).scalar() or 0)
-            session_user_count = int(
+            session_count = int(
                 db.execute(
                     text(
                         """
-                        select count(distinct a.user_id_hash)
+                        select count(*)
                         from auth_users a
                         join conversations c on c.user_id_hash = a.user_id_hash
                         where a.is_active
+                          and {time_predicate}
                         """
-                    )
+                        .format(time_predicate=timestamp_predicate.format(column="c.created_at"))
+                    ),
+                    {"start": start_at.isoformat(), "end": end_at.isoformat()},
                 ).scalar()
                 or 0
             )
@@ -2835,7 +2840,7 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
             improvement_rows = []
             average_improvement = 0.0
             active_users = 0
-            session_user_count = 0
+            session_count = 0
             active_groups = 0
             tenant_count = 0
 
@@ -2849,7 +2854,7 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
             improvement_series = [{"bucket": bucket, "value": improvement_by_bucket.get(bucket)} for bucket in buckets]
             return {
                 "active_users": active_users,
-                "session_user_count": session_user_count,
+                "session_count": session_count,
                 "active_groups": active_groups,
                 "tenant_count": tenant_count,
                 "average_improvement": round(average_improvement, 2),
@@ -2865,21 +2870,20 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
         active_users_query = active_users_query.where(UserTenantMembership.tenant_id == scope_id)
         active_groups_query = active_groups_query.where(Group.tenant_id == scope_id)
         tenant_count = 1
-        session_user_count = (
+        session_count = (
             db.execute(
                 text(
                     """
-                    select count(distinct m.user_id_hash)
+                    select count(*)
                     from user_tenant_membership m
-                    join (
-                      select distinct user_id_hash
-                      from conversations
-                    ) conv on conv.user_id_hash = m.user_id_hash
+                    join conversations conv on conv.user_id_hash = m.user_id_hash
                     where m.tenant_id = :tenant_id
                       and m.status = 'active'
+                      and {time_predicate}
                     """
+                    .format(time_predicate=timestamp_predicate.format(column="conv.created_at"))
                 ),
-                {"tenant_id": scope_id},
+                {"tenant_id": scope_id, "start": start_at.isoformat(), "end": end_at.isoformat()},
             ).scalar()
             or 0
         )
@@ -2890,7 +2894,22 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
         active_users = memberships
         active_groups = 1
         tenant_count = 1
-        session_user_count = memberships
+        session_count = (
+            db.execute(
+                text(
+                    """
+                    select count(*)
+                    from user_group_membership gm
+                    join conversations conv on conv.user_id_hash = gm.user_id_hash
+                    where gm.group_id = :group_id
+                      and {time_predicate}
+                    """
+                    .format(time_predicate=timestamp_predicate.format(column="conv.created_at"))
+                ),
+                {"group_id": scope_id, "start": start_at.isoformat(), "end": end_at.isoformat()},
+            ).scalar()
+            or 0
+        )
     elif scope_type == "reseller":
         tenant_ids = list(
             db.scalars(select(Tenant.id).where(Tenant.reseller_partner_id == scope_id))
@@ -2899,41 +2918,40 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
         active_groups_query = active_groups_query.where(Group.tenant_id.in_(tenant_ids))
         tenant_count = len(tenant_ids)
         if tenant_ids:
-            session_user_count = (
+            session_count = (
                 db.execute(
                     text(
                         """
-                        select count(distinct m.user_id_hash)
+                        select count(*)
                         from user_tenant_membership m
-                        join (
-                          select distinct user_id_hash
-                          from conversations
-                        ) conv on conv.user_id_hash = m.user_id_hash
+                        join conversations conv on conv.user_id_hash = m.user_id_hash
                         where m.tenant_id in :tenant_ids
                           and m.status = 'active'
+                          and {time_predicate}
                         """
+                        .format(time_predicate=timestamp_predicate.format(column="conv.created_at"))
                     ).bindparams(bindparam("tenant_ids", expanding=True)),
-                    {"tenant_ids": tenant_ids},
+                    {"tenant_ids": tenant_ids, "start": start_at.isoformat(), "end": end_at.isoformat()},
                 ).scalar()
                 or 0
             )
         else:
-            session_user_count = 0
+            session_count = 0
     else:
         tenant_count = db.scalar(tenant_count_query) or 0
-        session_user_count = (
+        session_count = (
             db.execute(
                 text(
                     """
-                    select count(distinct m.user_id_hash)
+                    select count(*)
                     from user_tenant_membership m
-                    join (
-                      select distinct user_id_hash
-                      from conversations
-                    ) conv on conv.user_id_hash = m.user_id_hash
+                    join conversations conv on conv.user_id_hash = m.user_id_hash
                     where m.status = 'active'
+                      and {time_predicate}
                     """
-                )
+                    .format(time_predicate=timestamp_predicate.format(column="conv.created_at"))
+                ),
+                {"start": start_at.isoformat(), "end": end_at.isoformat()},
             ).scalar()
             or 0
         )
@@ -2961,7 +2979,7 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
 
     return {
         "active_users": active_users,
-        "session_user_count": session_user_count,
+        "session_count": session_count,
         "active_groups": active_groups,
         "tenant_count": tenant_count,
         "average_improvement": round(8.5 + min(active_users, 20) * 0.7, 2),

@@ -86,9 +86,8 @@ export function DashboardPage() {
   const { report, systemOverview } = dashboardQuery.data;
   const activeUsersKpi = report.kpis.find((item) => item.label === "Active Users")?.value ?? systemOverview?.active_user_count ?? 0;
   const averageImprovementKpi = report.kpis.find((item) => item.label === "Average Improvement")?.value ?? "N/A";
-  const reportTenantCount = report.tables.find((item) => item.metric === "tenant_count")?.value;
-  const sessionUserCount = Number(report.tables.find((item) => item.metric === "session_user_count")?.value ?? 0);
-  const activeOrganizationCount = effectiveTenant ? 1 : Number(reportTenantCount ?? scopedTenants.length);
+  const sessionCount = Number(report.tables.find((item) => item.metric === "session_count")?.value ?? 0);
+  const activeOrganizationCount = scopedTenants.filter((tenant) => tenant.tenant.status === "active").length;
   const selectedScopeLabel = effectiveTenant?.tenant.tenant_name ?? "all visible organizations";
   const selectedRangeLabel = getRangeLabel(rangeKey);
   const usageTrend = report.charts.find((chart) => chart.label === "Usage Trend")?.points ?? [];
@@ -118,7 +117,7 @@ export function DashboardPage() {
           </div>
         </div>
         <div className="card metric-card">
-          <CardHelpTooltip text="Shows how many organizations are included in the current dashboard view." />
+          <CardHelpTooltip text="Shows how many organizations in the current dashboard scope are currently marked active." />
           <div className="metric-card__label">Active Organizations</div>
           <div className="metric-card__value">{activeOrganizationCount}</div>
           <div className="metric-card__trend">{scopedTenants.length} total organizations in view</div>
@@ -130,10 +129,10 @@ export function DashboardPage() {
           <div className="metric-card__trend">Average delta from initial to final prompt score for {selectedRangeLabel.toLowerCase()}</div>
         </div>
         <div className="card metric-card">
-          <CardHelpTooltip text="Shows how many authenticated users produced captured HermanPrompt session activity in the current range." />
-          <div className="metric-card__label">Users In Session</div>
-          <div className="metric-card__value">{sessionUserCount}</div>
-          <div className="metric-card__trend">Authenticated users with captured HermanPrompt session activity</div>
+          <CardHelpTooltip text="Shows how many captured HermanPrompt sessions occurred in the selected dashboard scope and date range." />
+          <div className="metric-card__label">Sessions</div>
+          <div className="metric-card__value">{sessionCount}</div>
+          <div className="metric-card__trend">Captured HermanPrompt sessions in {selectedRangeLabel.toLowerCase()}</div>
         </div>
       </div>
 

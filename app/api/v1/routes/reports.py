@@ -63,7 +63,7 @@ def run_report(
         tables=[
             {"metric": "tenant_count", "value": metrics["tenant_count"]},
             {"metric": "active_users", "value": metrics["active_users"]},
-            {"metric": "session_user_count", "value": metrics["session_user_count"]},
+            {"metric": "session_count", "value": metrics["session_count"]},
             {"metric": "active_groups", "value": metrics["active_groups"]},
         ],
     )

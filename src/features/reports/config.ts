@@ -106,7 +106,7 @@ export function deriveBehaviorGaps(report: ReportSummary) {
   const activeUsers = Number(report.kpis.find((item) => item.label === "Active Users")?.value ?? 0);
   const activeGroups = Number(report.kpis.find((item) => item.label === "Active Groups")?.value ?? 0);
   const averageImprovement = Number(String(report.kpis.find((item) => item.label === "Average Improvement")?.value ?? 0).replace("%", "")) || 0;
-  const sessionUserCount = Number(report.tables.find((item) => item.metric === "session_user_count")?.value ?? 0);
+  const sessionCount = Number(report.tables.find((item) => item.metric === "session_count")?.value ?? 0);
   const usageTrend = report.charts.find((chart) => chart.label === "Usage Trend")?.points ?? [];
   const firstUsage = usageTrend.find((point) => point.value != null)?.value ?? null;
   const lastUsage = [...usageTrend].reverse().find((point) => point.value != null)?.value ?? null;
@@ -115,11 +115,8 @@ export function deriveBehaviorGaps(report: ReportSummary) {
   if (activeUsers === 0) {
     gaps.push("No active users are visible in this scope yet, so adoption and improvement cannot be demonstrated.");
   }
-  if (sessionUserCount === 0) {
-    gaps.push("No users with tracked session activity were found in the selected window.");
-  }
-  if (activeUsers > 0 && sessionUserCount > 0 && sessionUserCount < Math.max(1, Math.ceil(activeUsers * 0.5))) {
-    gaps.push("Less than half of active users show captured session activity, which suggests uneven adoption.");
+  if (sessionCount === 0) {
+    gaps.push("No captured sessions were found in the selected window.");
   }
   if (activeGroups === 0 && report.filters.scope_type !== "group") {
     gaps.push("No active groups are reflected in this scope, which limits control-zone reporting and delegated admin visibility.");
