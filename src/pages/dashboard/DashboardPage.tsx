@@ -17,6 +17,9 @@ import {
   getRangeLabel,
 } from "../../features/dashboard/api";
 
+const GPT_55_INPUT_COST_PER_TOKEN = 5 / 1_000_000;
+const GPT_55_OUTPUT_COST_PER_TOKEN = 30 / 1_000_000;
+
 export function DashboardPage() {
   const { isLoading: scopeIsLoading, selectedTenant, selectedTenantId, visibleTenants } = useOrganizationScope();
   const [rangeKey, setRangeKey] = useState<DashboardRangeKey>("30d");
@@ -88,7 +91,6 @@ export function DashboardPage() {
   const activeUsersKpi = report.kpis.find((item) => item.label === "Active Users")?.value ?? systemOverview?.active_user_count ?? 0;
   const averageImprovementKpi = report.kpis.find((item) => item.label === "Average Improvement")?.value ?? "N/A";
   const sessionCount = Number(report.tables.find((item) => item.metric === "session_count")?.value ?? 0);
-  const activeOrganizationCount = scopedTenants.filter((tenant) => tenant.tenant.status === "active").length;
   const selectedScopeLabel = effectiveTenant?.tenant.tenant_name ?? "all visible organizations";
   const selectedRangeLabel = getRangeLabel(rangeKey);
   const usageTrend = report.charts.find((chart) => chart.label === "Usage Trend")?.points ?? [];
@@ -103,6 +105,27 @@ export function DashboardPage() {
     userResponseConsumption: userResponseTokenTrend[index]?.value ?? 0,
     totalTokenConsumption: point.value ?? 0,
   }));
+  const tokenSavingsUsd = totalTokenTrend.reduce((sum, point, index) => {
+    const totalTokens = Number(point.value ?? 0);
+    const estimatedSavedTokens = Number(tokenEfficiencyTrend[index]?.value ?? 0);
+    const adminTokens = Number(adminTokenTrend[index]?.value ?? 0);
+    const outputTokens = Number(userResponseTokenTrend[index]?.value ?? 0);
+
+    if (totalTokens <= 0 || estimatedSavedTokens <= 0) {
+      return sum;
+    }
+
+    const savingsRate = Math.min(Math.max(estimatedSavedTokens / totalTokens, 0), 1);
+    const adminSavingsUsd = adminTokens * savingsRate * GPT_55_INPUT_COST_PER_TOKEN;
+    const outputSavingsUsd = outputTokens * savingsRate * GPT_55_OUTPUT_COST_PER_TOKEN;
+    return sum + adminSavingsUsd + outputSavingsUsd;
+  }, 0);
+  const formattedTokenSavings = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(tokenSavingsUsd);
 
   return (
     <div className="stack">
@@ -128,22 +151,22 @@ export function DashboardPage() {
           </div>
         </div>
         <div className="card metric-card">
-          <CardHelpTooltip text="Shows how many organizations in the current dashboard scope are currently marked active." />
-          <div className="metric-card__label">Active Organizations</div>
-          <div className="metric-card__value">{activeOrganizationCount}</div>
-          <div className="metric-card__trend">{scopedTenants.length} total organizations in view</div>
+          <CardHelpTooltip text="Shows how many captured HermanPrompt sessions occurred in the selected dashboard scope and date range." />
+          <div className="metric-card__label">Sessions</div>
+          <div className="metric-card__value">{sessionCount}</div>
+          <div className="metric-card__trend">Captured HermanPrompt sessions in {selectedRangeLabel.toLowerCase()}</div>
         </div>
         <div className="card metric-card">
           <CardHelpTooltip text="Shows the average improvement between initial and final prompt scores for the selected reporting period." />
           <div className="metric-card__label">Avg Improvement</div>
           <div className="metric-card__value">{averageImprovementKpi}</div>
-          <div className="metric-card__trend">Average delta from initial to final prompt score for {selectedRangeLabel.toLowerCase()}</div>
+          <div className="metric-card__trend">Average improvement from initial to final prompt score for {selectedRangeLabel.toLowerCase()}</div>
         </div>
         <div className="card metric-card">
-          <CardHelpTooltip text="Shows how many captured HermanPrompt sessions occurred in the selected dashboard scope and date range." />
-          <div className="metric-card__label">Sessions</div>
-          <div className="metric-card__value">{sessionCount}</div>
-          <div className="metric-card__trend">Captured HermanPrompt sessions in {selectedRangeLabel.toLowerCase()}</div>
+          <CardHelpTooltip text="Estimates dollar savings by applying the dashboard's token-efficiency estimate to admin input tokens and user response output tokens, then pricing those saved tokens at current GPT-5.5 API rates." />
+          <div className="metric-card__label">Token Savings</div>
+          <div className="metric-card__value">{formattedTokenSavings}</div>
+          <div className="metric-card__trend">Estimated with GPT-5.5 pricing for {selectedRangeLabel.toLowerCase()}</div>
         </div>
       </div>
 
