@@ -30,6 +30,7 @@ class ResellerPartner(TimestampMixin, Base):
     reseller_name: Mapped[str] = mapped_column(String(200))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     service_tier_definition_id: Mapped[str | None] = mapped_column(ForeignKey("service_tier_definitions.id"), index=True)
+    lifecycle_snapshot_json: Mapped[str | None] = mapped_column(Text)
 
     tenants: Mapped[list["Tenant"]] = relationship(back_populates="reseller_partner")
     tenant_defaults: Mapped["ResellerTenantDefaults | None"] = relationship(back_populates="reseller_partner", uselist=False)
@@ -196,7 +197,6 @@ class AdminUser(TimestampMixin, Base):
         back_populates="admin_user",
         cascade="all, delete-orphan",
     )
-    profile: Mapped["AdminProfile | None"] = relationship(back_populates="admin_user", uselist=False)
     sessions: Mapped[list["AdminSession"]] = relationship(back_populates="admin_user", cascade="all, delete-orphan")
 
 
@@ -205,15 +205,8 @@ class UserMembershipProfile(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     tenant_membership_id: Mapped[str] = mapped_column(ForeignKey("user_tenant_membership.id"), unique=True, index=True)
-    first_name: Mapped[str | None] = mapped_column(String(100))
-    last_name: Mapped[str | None] = mapped_column(String(100))
-    email: Mapped[str | None] = mapped_column(String(200))
     title: Mapped[str | None] = mapped_column(String(100))
     initial_user_type: Mapped[int | None] = mapped_column(Integer)
-    utilization_level: Mapped[str | None] = mapped_column(String(50))
-    sessions_count: Mapped[int] = mapped_column(Integer, default=0)
-    avg_improvement_pct: Mapped[int | None] = mapped_column(Integer)
-    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     membership: Mapped["UserTenantMembership"] = relationship(back_populates="profile")
 
@@ -236,17 +229,6 @@ class UserInvitation(TimestampMixin, Base):
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
-
-
-class AdminProfile(TimestampMixin, Base):
-    __tablename__ = "admin_profiles"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    admin_user_id: Mapped[str] = mapped_column(ForeignKey("admin_users.id"), unique=True, index=True)
-    display_name: Mapped[str | None] = mapped_column(String(200))
-    email: Mapped[str | None] = mapped_column(String(200))
-
-    admin_user: Mapped["AdminUser"] = relationship(back_populates="profile")
 
 
 class AdminScope(Base):
@@ -296,8 +278,8 @@ class TenantLLMConfig(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), unique=True, index=True)
-    provider_type: Mapped[str] = mapped_column(String(100))
-    model_name: Mapped[str] = mapped_column(String(200))
+    provider_type: Mapped[str | None] = mapped_column(String(100))
+    model_name: Mapped[str | None] = mapped_column(String(200))
     endpoint_url: Mapped[str | None] = mapped_column(String(500))
     api_key_masked: Mapped[str | None] = mapped_column(String(32))
     secret_reference: Mapped[str | None] = mapped_column(String(255))

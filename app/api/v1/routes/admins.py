@@ -12,15 +12,17 @@ from app.services import (
     get_canonical_user_id_hash,
     get_admin_or_404,
     refresh_onboarding_state,
+    resolve_admin_profile_summary,
+    sync_auth_user_admin_authority,
     serialize_model,
-    upsert_admin_profile,
+    ensure_admin_auth_identity,
     write_audit_log,
 )
 
 router = APIRouter()
 
 
-def to_admin_summary(admin: AdminUser) -> AdminUserSummary:
+def to_admin_summary(db: Session, admin: AdminUser) -> AdminUserSummary:
     return AdminUserSummary(
         id=admin.id,
         user_id_hash=admin.user_id_hash,
@@ -40,7 +42,11 @@ def to_admin_summary(admin: AdminUser) -> AdminUserSummary:
             )
             for item in admin.scopes
         ],
-        profile=AdminProfileSummary.model_validate(admin.profile, from_attributes=True) if admin.profile else None,
+        profile=(
+            AdminProfileSummary.model_validate(profile_summary)
+            if (profile_summary := resolve_admin_profile_summary(db, admin)) is not None
+            else None
+        ),
     )
 
 
@@ -65,7 +71,7 @@ def list_admins(
                     group_id=scope.group_id,
                 )
                 break
-        items.append(to_admin_summary(admin))
+        items.append(to_admin_summary(db, admin))
     return ListEnvelope[AdminUserSummary](items=items, page=1, page_size=len(items) or 1, total_count=len(items), filters={"role": role})
 
 
@@ -98,7 +104,21 @@ def create_admin(
                 detail=f"User is already assigned as {admin.role}. Update the existing admin assignment instead.",
             )
 
-    upsert_admin_profile(db, admin, payload.model_dump(mode="json"))
+    profile_updates = {
+        key: value
+        for key, value in payload.model_dump(mode="json").items()
+        if key in {"display_name", "email"} and value is not None
+    }
+    if profile_updates:
+        ensure_admin_auth_identity(
+            db,
+            user_id_hash=resolved_user_id_hash,
+            email=profile_updates.get("email"),
+            display_name=profile_updates.get("display_name"),
+            is_active=admin.is_active,
+        )
+    else:
+        sync_auth_user_admin_authority(db, user_id_hash=resolved_user_id_hash)
 
     existing_permissions = {item.permission_key for item in admin.permissions}
     for permission in payload.permissions:
@@ -143,7 +163,7 @@ def create_admin(
     )
     db.commit()
     db.refresh(admin)
-    return ResourceEnvelope[AdminUserSummary](resource=to_admin_summary(admin), updated_at=admin.updated_at)
+    return ResourceEnvelope[AdminUserSummary](resource=to_admin_summary(db, admin), updated_at=admin.updated_at)
 
 
 @router.patch("/{admin_id}", response_model=ResourceEnvelope[AdminUserSummary])
@@ -171,7 +191,15 @@ def update_admin(
         if key in {"display_name", "email"}
     }
     if profile_updates:
-        upsert_admin_profile(db, admin, profile_updates)
+        ensure_admin_auth_identity(
+            db,
+            user_id_hash=admin.user_id_hash,
+            email=profile_updates.get("email"),
+            display_name=profile_updates.get("display_name"),
+            is_active=admin.is_active if payload.is_active is None else payload.is_active,
+        )
+    else:
+        sync_auth_user_admin_authority(db, user_id_hash=admin.user_id_hash)
     if payload.permissions is not None:
         db.execute(delete(AdminPermission).where(AdminPermission.admin_user_id == admin.id))
         for permission in payload.permissions:
@@ -201,4 +229,4 @@ def update_admin(
     )
     db.commit()
     db.refresh(admin)
-    return ResourceEnvelope[AdminUserSummary](resource=to_admin_summary(admin), updated_at=admin.updated_at)
+    return ResourceEnvelope[AdminUserSummary](resource=to_admin_summary(db, admin), updated_at=admin.updated_at)

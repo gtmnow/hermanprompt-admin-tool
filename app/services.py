@@ -17,7 +17,6 @@ from app.db import engine
 from app.models import (
     AdminAuditLog,
     AdminPermission,
-    AdminProfile,
     AdminSession,
     AdminScope,
     AdminUser,
@@ -44,7 +43,7 @@ from app.models import (
 from app.security import Principal
 
 AUTH_USER_DISABLED_PASSWORD_HASH = "$2y$12$meGFiGyYM5aRO0bDJmpuN.gfvgLNTF/5lk/qgIiSI1/DHuy9XNoQS"
-FOUNDATIONAL_PROFILE_TABLES = ("type_detail", "final_profile")
+FOUNDATIONAL_PROFILE_TABLES = ("type_detail",)
 FOUNDATIONAL_PROFILE_FIELDS = (
     "structure",
     "answer_first",
@@ -479,6 +478,257 @@ def generate_reseller_key(db: Session, reseller_name: str, *, exclude_reseller_i
         suffix += 1
 
 
+def get_reseller_impact_counts(db: Session, reseller: ResellerPartner) -> dict[str, int]:
+    organization_count = int(
+        db.scalar(
+            select(func.count()).select_from(Tenant).where(Tenant.reseller_partner_id == reseller.id)
+        )
+        or 0
+    )
+    total_user_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(UserTenantMembership)
+            .join(Tenant, Tenant.id == UserTenantMembership.tenant_id)
+            .where(
+                Tenant.reseller_partner_id == reseller.id,
+                UserTenantMembership.status != "deleted",
+            )
+        )
+        or 0
+    )
+    partner_admin_count = int(
+        db.scalar(
+            select(func.count(func.distinct(AdminScope.admin_user_id)))
+            .select_from(AdminScope)
+            .where(AdminScope.reseller_partner_id == reseller.id)
+        )
+        or 0
+    )
+    return {
+        "organization_count": organization_count,
+        "total_user_count": total_user_count,
+        "partner_admin_count": partner_admin_count,
+    }
+
+
+def reseller_admin_user_ids(db: Session, reseller_id: str) -> list[str]:
+    return [
+        str(admin_user_id)
+        for admin_user_id in db.scalars(
+            select(AdminScope.admin_user_id)
+            .where(AdminScope.reseller_partner_id == reseller_id)
+            .distinct()
+        )
+    ]
+
+
+def revoke_admin_sessions_for_users(db: Session, admin_user_ids: list[str]) -> None:
+    if not admin_user_ids:
+        return
+    now = utc_now()
+    db.execute(
+        text(
+            """
+            update admin_sessions
+            set revoked_at = :revoked_at
+            where admin_user_id in :admin_user_ids
+              and revoked_at is null
+            """
+        ).bindparams(bindparam("admin_user_ids", expanding=True)),
+        {"revoked_at": now, "admin_user_ids": admin_user_ids},
+    )
+
+
+def set_admin_users_active(db: Session, admin_user_ids: list[str], *, is_active: bool) -> None:
+    if not admin_user_ids:
+        return
+    now = utc_now()
+    db.execute(
+        text(
+            """
+            update admin_users
+            set
+              is_active = :is_active,
+              updated_at = :updated_at
+            where id in :admin_user_ids
+            """
+        ).bindparams(bindparam("admin_user_ids", expanding=True)),
+        {
+            "is_active": is_active,
+            "updated_at": now,
+            "admin_user_ids": admin_user_ids,
+        },
+    )
+    if not is_active:
+        revoke_admin_sessions_for_users(db, admin_user_ids)
+
+
+def auth_user_snapshot_by_user_id(db: Session, user_id_hash: str) -> dict[str, object] | None:
+    auth_row = db.execute(
+        text("select * from auth_users where user_id_hash = :user_id_hash order by id desc limit 1"),
+        {"user_id_hash": user_id_hash},
+    ).mappings().first()
+    if auth_row is None:
+        return None
+
+    credential_row = None
+    if has_auth_user_credentials_table(db):
+        credential_row = db.execute(
+            text("select * from auth_user_credentials where user_id_hash = :user_id_hash"),
+            {"user_id_hash": user_id_hash},
+        ).mappings().first()
+
+    snapshot: dict[str, object] = {
+        "auth_user": {
+            "tenant_id": auth_row.get("tenant_id"),
+            "is_active": bool(auth_row.get("is_active")),
+        }
+    }
+    if auth_users_has_legacy_password_columns(db):
+        snapshot["auth_user"]["password_hash"] = auth_row.get("password_hash")
+        snapshot["auth_user"]["password_changed_at"] = (
+            auth_row.get("password_changed_at").isoformat() if auth_row.get("password_changed_at") else None
+        )
+    if credential_row is not None:
+        snapshot["auth_user_credentials"] = {
+            "password_hash": credential_row.get("password_hash"),
+            "password_algorithm": credential_row.get("password_algorithm"),
+            "password_set_at": credential_row.get("password_set_at").isoformat() if credential_row.get("password_set_at") else None,
+            "failed_login_attempts": credential_row.get("failed_login_attempts"),
+            "locked_until": credential_row.get("locked_until").isoformat() if credential_row.get("locked_until") else None,
+            "last_login_at": credential_row.get("last_login_at").isoformat() if credential_row.get("last_login_at") else None,
+        }
+    return snapshot
+
+
+def build_reseller_lifecycle_snapshot(db: Session, reseller: ResellerPartner) -> dict[str, object]:
+    tenant_snapshots: list[dict[str, object]] = []
+    seen_user_ids: set[str] = set()
+    user_snapshots: list[dict[str, object]] = []
+
+    for tenant in db.scalars(
+        select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc())
+    ):
+        tenant_snapshots.append({"tenant_id": tenant.id, "status": tenant.status})
+        for membership in db.scalars(
+            select(UserTenantMembership).where(UserTenantMembership.tenant_id == tenant.id)
+        ):
+            membership_snapshot: dict[str, object] = {
+                "user_id_hash": membership.user_id_hash,
+                "tenant_id": membership.tenant_id,
+                "status": membership.status,
+            }
+            if membership.user_id_hash not in seen_user_ids:
+                seen_user_ids.add(membership.user_id_hash)
+                auth_snapshot = auth_user_snapshot_by_user_id(db, membership.user_id_hash)
+                if auth_snapshot is not None:
+                    membership_snapshot["auth_state"] = auth_snapshot
+            user_snapshots.append(membership_snapshot)
+
+    admin_snapshots = []
+    for admin_id in reseller_admin_user_ids(db, reseller.id):
+        admin = db.get(AdminUser, admin_id)
+        if admin is not None:
+            admin_snapshots.append({"admin_user_id": admin.id, "is_active": admin.is_active})
+
+    return {
+        "partner_is_active": reseller.is_active,
+        "tenants": tenant_snapshots,
+        "users": user_snapshots,
+        "partner_admins": admin_snapshots,
+    }
+
+
+def restore_user_auth_snapshot(db: Session, user_id_hash: str, auth_state: dict[str, object] | None) -> None:
+    if not auth_state:
+        return
+    auth_user = auth_state.get("auth_user")
+    if isinstance(auth_user, dict):
+        now = datetime.utcnow()
+        update_fields = {
+            "tenant_id": auth_user.get("tenant_id"),
+            "is_active": bool(auth_user.get("is_active")),
+            "updated_at": now,
+            "user_id_hash": user_id_hash,
+        }
+        if auth_users_has_legacy_password_columns(db):
+            update_fields["password_hash"] = auth_user.get("password_hash")
+            update_fields["password_changed_at"] = auth_user.get("password_changed_at")
+            db.execute(
+                text(
+                    """
+                    update auth_users
+                    set
+                      tenant_id = :tenant_id,
+                      is_active = :is_active,
+                      password_hash = :password_hash,
+                      password_changed_at = :password_changed_at,
+                      updated_at = :updated_at
+                    where user_id_hash = :user_id_hash
+                    """
+                ),
+                update_fields,
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    update auth_users
+                    set
+                      tenant_id = :tenant_id,
+                      is_active = :is_active,
+                      updated_at = :updated_at
+                    where user_id_hash = :user_id_hash
+                    """
+                ),
+                update_fields,
+            )
+
+    credential_state = auth_state.get("auth_user_credentials")
+    if isinstance(credential_state, dict) and has_auth_user_credentials_table(db):
+        db.execute(
+            text(
+                """
+                insert into auth_user_credentials (
+                  user_id_hash,
+                  password_hash,
+                  password_algorithm,
+                  password_set_at,
+                  failed_login_attempts,
+                  locked_until,
+                  last_login_at
+                ) values (
+                  :user_id_hash,
+                  :password_hash,
+                  :password_algorithm,
+                  :password_set_at,
+                  :failed_login_attempts,
+                  :locked_until,
+                  :last_login_at
+                )
+                on conflict (user_id_hash) do update
+                set
+                  password_hash = excluded.password_hash,
+                  password_algorithm = excluded.password_algorithm,
+                  password_set_at = excluded.password_set_at,
+                  failed_login_attempts = excluded.failed_login_attempts,
+                  locked_until = excluded.locked_until,
+                  last_login_at = excluded.last_login_at
+                """
+            ),
+            {
+                "user_id_hash": user_id_hash,
+                "password_hash": credential_state.get("password_hash"),
+                "password_algorithm": credential_state.get("password_algorithm"),
+                "password_set_at": credential_state.get("password_set_at"),
+                "failed_login_attempts": credential_state.get("failed_login_attempts"),
+                "locked_until": credential_state.get("locked_until"),
+                "last_login_at": credential_state.get("last_login_at"),
+            },
+        )
+
+
 def ensure_additive_schema_extensions() -> None:
     with engine.begin() as connection:
         inspector = inspect(connection)
@@ -504,6 +754,8 @@ def ensure_additive_schema_extensions() -> None:
             reseller_columns = {column["name"] for column in inspector.get_columns("reseller_partners")}
             if "service_tier_definition_id" not in reseller_columns:
                 connection.execute(text("ALTER TABLE reseller_partners ADD COLUMN service_tier_definition_id VARCHAR(36)"))
+            if "lifecycle_snapshot_json" not in reseller_columns:
+                connection.execute(text("ALTER TABLE reseller_partners ADD COLUMN lifecycle_snapshot_json TEXT"))
 
         if "tenants" in existing_tables:
             tenant_columns = {column["name"] for column in inspector.get_columns("tenants")}
@@ -981,7 +1233,6 @@ def get_snapshot_users(db: Session, tenant: Tenant | None = None) -> list[dict[s
               a.email,
               a.display_name,
               a.is_active,
-              a.is_admin,
               a.created_at,
               a.updated_at,
               a.last_login_at,
@@ -1030,7 +1281,6 @@ def get_auth_users(db: Session, user_id_hash: str | None = None) -> list[dict[st
               a.email,
               a.display_name,
               a.is_active,
-              a.is_admin,
               a.created_at,
               a.updated_at,
               a.last_login_at,
@@ -1060,6 +1310,102 @@ def get_auth_users(db: Session, user_id_hash: str | None = None) -> list[dict[st
     return [dict(row) for row in rows]
 
 
+def get_auth_user_identity(db: Session, *, user_id_hash: str) -> dict[str, object] | None:
+    row = db.execute(
+        text(
+            """
+            select
+              user_id_hash,
+              email,
+              display_name
+            from auth_users
+            where user_id_hash = :user_id_hash
+            order by updated_at desc, created_at desc, id desc
+            limit 1
+            """
+        ),
+        {"user_id_hash": user_id_hash},
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+def sync_auth_user_admin_authority(db: Session, *, user_id_hash: str) -> bool:
+    existing = get_auth_user_identity(db, user_id_hash=user_id_hash)
+    if existing is None:
+        return False
+    return True
+
+
+def sync_admin_identity_to_auth_user(
+    db: Session,
+    *,
+    user_id_hash: str,
+    email: str | None = None,
+    display_name: str | None = None,
+) -> bool:
+    if email is None and display_name is None:
+        return False
+
+    existing = get_auth_user_identity(db, user_id_hash=user_id_hash)
+    if existing is None:
+        return False
+
+    normalized_email = normalize_email(email) if email is not None else None
+    if email is not None and normalized_email is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
+
+    if normalized_email is not None:
+        conflicting_user = db.execute(
+            text(
+                """
+                select id
+                from auth_users
+                where lower(email) = :email
+                  and user_id_hash != :user_id_hash
+                order by id desc
+                limit 1
+                """
+            ),
+            {"email": normalized_email, "user_id_hash": user_id_hash},
+        ).scalar_one_or_none()
+        if conflicting_user is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email is already assigned to a different auth user",
+            )
+
+    db.execute(
+        text(
+            """
+            update auth_users
+            set
+              email = :email,
+              display_name = :display_name,
+              updated_at = :updated_at
+            where user_id_hash = :user_id_hash
+            """
+        ),
+        {
+            "user_id_hash": user_id_hash,
+            "email": normalized_email if normalized_email is not None else existing.get("email"),
+            "display_name": display_name if display_name is not None else existing.get("display_name"),
+            "updated_at": datetime.utcnow(),
+        },
+    )
+    return True
+
+
+def resolve_admin_profile_summary(db: Session, admin: AdminUser) -> dict[str, str | None] | None:
+    auth_identity = get_auth_user_identity(db, user_id_hash=admin.user_id_hash)
+    if auth_identity is not None:
+        return {
+            "display_name": str(auth_identity["display_name"]) if auth_identity.get("display_name") is not None else None,
+            "email": str(auth_identity["email"]) if auth_identity.get("email") is not None else None,
+        }
+
+    return None
+
+
 def upsert_auth_user(
     db: Session,
     *,
@@ -1070,13 +1416,16 @@ def upsert_auth_user(
     last_name: str | None = None,
     display_name: str | None = None,
     status: str = "active",
-    is_admin: bool | None = None,
 ) -> dict[str, object]:
     normalized_email = normalize_email(email)
     if normalized_email is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
 
-    auth_tenant_id = preferred_auth_tenant_id(tenant)
+    auth_tenant_id = resolve_auth_user_primary_tenant_id(
+        db,
+        user_id_hash=user_id_hash,
+        fallback_tenant_id=preferred_auth_tenant_id(tenant),
+    )
     resolved_display_name = build_display_name(first_name, last_name, display_name) or normalized_email
     desired_is_active = status == "active"
 
@@ -1096,7 +1445,6 @@ def upsert_auth_user(
         )
 
     existing = existing_by_user or existing_by_email
-    resolved_is_admin = bool(existing["is_admin"]) if existing and is_admin is None else bool(is_admin)
     now = datetime.utcnow()
     credentials_table_exists = has_auth_user_credentials_table(db)
     legacy_password_columns = auth_users_has_legacy_password_columns(db)
@@ -1111,7 +1459,6 @@ def upsert_auth_user(
                   display_name = :display_name,
                   tenant_id = :tenant_id,
                   is_active = :is_active,
-                  is_admin = :is_admin,
                   updated_at = :updated_at
                 where id = :id
                 """
@@ -1122,7 +1469,6 @@ def upsert_auth_user(
                 "display_name": resolved_display_name,
                 "tenant_id": auth_tenant_id,
                 "is_active": desired_is_active,
-                "is_admin": resolved_is_admin,
                 "updated_at": now,
             },
         )
@@ -1138,7 +1484,6 @@ def upsert_auth_user(
                       display_name,
                       tenant_id,
                       is_active,
-                      is_admin,
                       created_at,
                       updated_at,
                       last_login_at,
@@ -1150,7 +1495,6 @@ def upsert_auth_user(
                       :display_name,
                       :tenant_id,
                       :is_active,
-                      :is_admin,
                       :created_at,
                       :updated_at,
                       null,
@@ -1165,7 +1509,6 @@ def upsert_auth_user(
                     "display_name": resolved_display_name,
                     "tenant_id": auth_tenant_id,
                     "is_active": desired_is_active,
-                    "is_admin": resolved_is_admin,
                     "created_at": now,
                     "updated_at": now,
                 },
@@ -1180,7 +1523,6 @@ def upsert_auth_user(
                       display_name,
                       tenant_id,
                       is_active,
-                      is_admin,
                       created_at,
                       updated_at,
                       last_login_at
@@ -1190,7 +1532,6 @@ def upsert_auth_user(
                       :display_name,
                       :tenant_id,
                       :is_active,
-                      :is_admin,
                       :created_at,
                       :updated_at,
                       null
@@ -1203,7 +1544,6 @@ def upsert_auth_user(
                     "display_name": resolved_display_name,
                     "tenant_id": auth_tenant_id,
                     "is_active": desired_is_active,
-                    "is_admin": resolved_is_admin,
                     "created_at": now,
                     "updated_at": now,
                 },
@@ -1217,6 +1557,65 @@ def upsert_auth_user(
         {"user_id_hash": user_id_hash},
     ).mappings().first()
     return dict(row) if row else {}
+
+
+def resolve_auth_user_primary_tenant_id(
+    db: Session,
+    *,
+    user_id_hash: str,
+    fallback_tenant_id: str | None = None,
+) -> str | None:
+    if table_exists(db, "user_tenant_membership"):
+        tenant_id = db.execute(
+            text(
+                """
+                select tenant_id
+                from user_tenant_membership
+                where user_id_hash = :user_id_hash
+                  and is_primary = true
+                  and status != 'deleted'
+                order by updated_at desc, created_at desc
+                limit 1
+                """
+            ),
+            {"user_id_hash": user_id_hash},
+        ).scalar_one_or_none()
+        if tenant_id is not None:
+            return str(tenant_id)
+    return fallback_tenant_id
+
+
+def sync_auth_user_primary_tenant(
+    db: Session,
+    *,
+    user_id_hash: str,
+    fallback_tenant_id: str | None = None,
+) -> None:
+    resolved_tenant_id = resolve_auth_user_primary_tenant_id(
+        db,
+        user_id_hash=user_id_hash,
+        fallback_tenant_id=fallback_tenant_id,
+    )
+    if resolved_tenant_id is None or not table_exists(db, "auth_users"):
+        return
+
+    db.execute(
+        text(
+            """
+            update auth_users
+            set
+              tenant_id = :tenant_id,
+              updated_at = :updated_at
+            where user_id_hash = :user_id_hash
+              and coalesce(tenant_id, '') <> :tenant_id
+            """
+        ),
+        {
+            "tenant_id": resolved_tenant_id,
+            "updated_at": datetime.utcnow(),
+            "user_id_hash": user_id_hash,
+        },
+    )
 
 
 def get_canonical_user_id_hash(
@@ -1260,6 +1659,86 @@ def foundational_profile_for_user_type(initial_user_type: int) -> dict[str, floa
         return dict(SUMMARY_TYPE_PROFILE_ROWS[initial_user_type])
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid initial user type") from exc
+
+
+def upsert_effective_profile_from_foundational(
+    db: Session,
+    *,
+    user_id_hash: str,
+) -> None:
+    required_tables = ("type_detail", "final_profile")
+    if any(not table_exists(db, table_name) for table_name in required_tables):
+        return
+
+    db.execute(
+        text(
+            """
+            INSERT INTO final_profile (
+              user_id_hash,
+              structure,
+              answer_first,
+              tone_directness,
+              detail_level,
+              ambiguity_reduction,
+              exploration_level,
+              context_loading,
+              prompt_enforcement_level,
+              compliance_check_enabled,
+              pii_check_enabled,
+              profile_version,
+              updated_at
+            )
+            SELECT
+              t.user_id_hash,
+              coalesce(ba.structure, ed.structure, bc.structure, t.structure) AS structure,
+              coalesce(ba.answer_first, ed.answer_first, bc.answer_first, t.answer_first) AS answer_first,
+              coalesce(ba.tone_directness, ed.tone_directness, bc.tone_directness, t.tone_directness) AS tone_directness,
+              coalesce(ba.detail_level, ed.detail_level, bc.detail_level, t.detail_level) AS detail_level,
+              coalesce(ba.ambiguity_reduction, ed.ambiguity_reduction, bc.ambiguity_reduction, t.ambiguity_reduction) AS ambiguity_reduction,
+              coalesce(ba.exploration_level, ed.exploration_level, bc.exploration_level, t.exploration_level) AS exploration_level,
+              coalesce(ba.context_loading, ed.context_loading, bc.context_loading, t.context_loading) AS context_loading,
+              coalesce(ba.prompt_enforcement_level, ed.prompt_enforcement_level, bc.prompt_enforcement_level, t.prompt_enforcement_level) AS prompt_enforcement_level,
+              coalesce(ba.compliance_check_enabled, ed.compliance_check_enabled, bc.compliance_check_enabled, t.compliance_check_enabled) AS compliance_check_enabled,
+              coalesce(ba.pii_check_enabled, ed.pii_check_enabled, bc.pii_check_enabled, t.pii_check_enabled) AS pii_check_enabled,
+              CASE
+                WHEN bc.user_id_hash IS NOT NULL
+                  OR ed.user_id_hash IS NOT NULL
+                  OR ba.user_id_hash IS NOT NULL
+                THEN left(coalesce(nullif(t.profile_version, ''), 'type_detail') || '+layers', 50)
+                ELSE t.profile_version
+              END AS profile_version,
+              greatest(
+                coalesce(t.updated_at, CURRENT_TIMESTAMP),
+                coalesce(bc.updated_at, t.updated_at, CURRENT_TIMESTAMP),
+                coalesce(ed.updated_at, t.updated_at, CURRENT_TIMESTAMP),
+                coalesce(ba.updated_at, t.updated_at, CURRENT_TIMESTAMP)
+              ) AS updated_at
+            FROM type_detail AS t
+            LEFT JOIN brain_chemistry AS bc
+              ON bc.user_id_hash = t.user_id_hash
+            LEFT JOIN environment_details AS ed
+              ON ed.user_id_hash = t.user_id_hash
+            LEFT JOIN behaviorial_adj AS ba
+              ON ba.user_id_hash = t.user_id_hash
+            WHERE t.user_id_hash = :user_id_hash
+            ON CONFLICT (user_id_hash) DO UPDATE
+            SET
+              structure = excluded.structure,
+              answer_first = excluded.answer_first,
+              tone_directness = excluded.tone_directness,
+              detail_level = excluded.detail_level,
+              ambiguity_reduction = excluded.ambiguity_reduction,
+              exploration_level = excluded.exploration_level,
+              context_loading = excluded.context_loading,
+              prompt_enforcement_level = excluded.prompt_enforcement_level,
+              compliance_check_enabled = excluded.compliance_check_enabled,
+              pii_check_enabled = excluded.pii_check_enabled,
+              profile_version = excluded.profile_version,
+              updated_at = excluded.updated_at
+            """
+        ),
+        {"user_id_hash": user_id_hash},
+    )
 
 
 def seed_foundational_profile(
@@ -1341,6 +1820,8 @@ def seed_foundational_profile(
                 ),
                 payload,
             )
+
+    upsert_effective_profile_from_foundational(db, user_id_hash=user_id_hash)
 
 
 def ensure_deactivated_users_tenant(db: Session) -> Tenant:
@@ -1774,6 +2255,161 @@ def inactivate_tenant_state(db: Session, tenant: Tenant) -> list[str]:
     return user_ids
 
 
+def activate_tenant_state(db: Session, tenant: Tenant) -> list[str]:
+    tenant_candidates = auth_tenant_candidates(tenant)
+    user_ids = [
+        str(user_id)
+        for user_id in db.scalars(
+            select(UserTenantMembership.user_id_hash).where(
+                UserTenantMembership.tenant_id == tenant.id,
+                UserTenantMembership.status != "deleted",
+            )
+        )
+    ]
+    now = datetime.utcnow()
+    if tenant_candidates and table_exists(db, "auth_users"):
+        db.execute(
+            text(
+                """
+                update auth_users
+                set
+                  is_active = true,
+                  updated_at = :updated_at
+                where tenant_id in :tenant_candidates
+                """
+            ).bindparams(bindparam("tenant_candidates", expanding=True)),
+            {
+                "updated_at": now,
+                "tenant_candidates": tenant_candidates,
+            },
+        )
+    db.execute(
+        text(
+            """
+            update user_tenant_membership
+            set
+              status = 'active',
+              updated_at = :updated_at
+            where tenant_id = :tenant_id
+              and status != 'deleted'
+            """
+        ),
+        {"tenant_id": tenant.id, "updated_at": now},
+    )
+    tenant.status = "active"
+    return user_ids
+
+
+def inactivate_reseller_state(db: Session, reseller: ResellerPartner) -> dict[str, int]:
+    counts = get_reseller_impact_counts(db, reseller)
+    if reseller.lifecycle_snapshot_json:
+        reseller.is_active = False
+        return counts
+    reseller.lifecycle_snapshot_json = json.dumps(build_reseller_lifecycle_snapshot(db, reseller), sort_keys=True)
+    admin_user_ids = reseller_admin_user_ids(db, reseller.id)
+    set_admin_users_active(db, admin_user_ids, is_active=False)
+    for tenant in db.scalars(
+        select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc())
+    ):
+        inactivate_tenant_state(db, tenant)
+        refresh_onboarding_state(db, tenant.id)
+    reseller.is_active = False
+    return counts
+
+
+def activate_reseller_state(db: Session, reseller: ResellerPartner) -> dict[str, int]:
+    counts = get_reseller_impact_counts(db, reseller)
+    snapshot = json.loads(reseller.lifecycle_snapshot_json) if reseller.lifecycle_snapshot_json else None
+    if not isinstance(snapshot, dict):
+        admin_user_ids = reseller_admin_user_ids(db, reseller.id)
+        set_admin_users_active(db, admin_user_ids, is_active=True)
+        for tenant in db.scalars(
+            select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc())
+        ):
+            activate_tenant_state(db, tenant)
+            refresh_onboarding_state(db, tenant.id)
+        reseller.is_active = True
+        return counts
+
+    for admin_state in snapshot.get("partner_admins", []):
+        if not isinstance(admin_state, dict):
+            continue
+        admin = db.get(AdminUser, admin_state.get("admin_user_id"))
+        if admin is not None:
+            admin.is_active = bool(admin_state.get("is_active"))
+
+    for tenant_state in snapshot.get("tenants", []):
+        if not isinstance(tenant_state, dict):
+            continue
+        tenant = db.get(Tenant, tenant_state.get("tenant_id"))
+        if tenant is not None:
+            tenant.status = str(tenant_state.get("status") or tenant.status)
+
+    for user_state in snapshot.get("users", []):
+        if not isinstance(user_state, dict):
+            continue
+        membership = db.scalar(
+            select(UserTenantMembership).where(
+                UserTenantMembership.user_id_hash == user_state.get("user_id_hash"),
+                UserTenantMembership.tenant_id == user_state.get("tenant_id"),
+            )
+        )
+        if membership is not None and user_state.get("status"):
+            membership.status = str(user_state["status"])
+        restore_user_auth_snapshot(
+            db,
+            str(user_state.get("user_id_hash")),
+            user_state.get("auth_state") if isinstance(user_state.get("auth_state"), dict) else None,
+        )
+
+    for tenant in db.scalars(
+        select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc())
+    ):
+        refresh_onboarding_state(db, tenant.id)
+    reseller.is_active = bool(snapshot.get("partner_is_active", True))
+    reseller.lifecycle_snapshot_json = None
+    return counts
+
+
+def delete_reseller_and_tenants(db: Session, reseller: ResellerPartner) -> dict[str, int]:
+    if reseller.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Partner must be inactive before deletion")
+
+    counts = get_reseller_impact_counts(db, reseller)
+    admin_user_ids = reseller_admin_user_ids(db, reseller.id)
+
+    for tenant in list(
+        db.scalars(select(Tenant).where(Tenant.reseller_partner_id == reseller.id).order_by(Tenant.created_at.asc()))
+    ):
+        delete_tenant_and_users(db, tenant)
+
+    if admin_user_ids:
+        revoke_admin_sessions_for_users(db, admin_user_ids)
+        db.execute(delete(AdminScope).where(AdminScope.reseller_partner_id == reseller.id))
+        set_admin_users_active(db, admin_user_ids, is_active=False)
+
+    for admin_id in admin_user_ids:
+        admin = db.get(AdminUser, admin_id)
+        if admin is None:
+            continue
+        remaining_scope_count = db.scalar(
+            select(func.count()).select_from(AdminScope).where(AdminScope.admin_user_id == admin.id)
+        ) or 0
+        if remaining_scope_count == 0:
+            admin.is_active = False
+
+    db.execute(
+        delete(ReportExportJob).where(
+            ReportExportJob.scope_type == "reseller",
+            ReportExportJob.scope_id == reseller.id,
+        )
+    )
+    if reseller.tenant_defaults is not None:
+        db.delete(reseller.tenant_defaults)
+    db.delete(reseller)
+    return counts
+
+
 def delete_tenant_and_users(db: Session, tenant: Tenant) -> list[str]:
     tenant_candidates = auth_tenant_candidates(tenant)
     group_ids = [
@@ -1928,8 +2564,6 @@ def delete_tenant_and_users(db: Session, tenant: Tenant) -> list[str]:
         ) or 0
         if remaining_scope_count == 0:
             db.execute(delete(AdminPermission).where(AdminPermission.admin_user_id == admin.id))
-            if admin.profile is not None:
-                db.delete(admin.profile)
             db.delete(admin)
 
     if tenant.llm_config is not None:
@@ -2232,16 +2866,21 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
         active_groups_query = active_groups_query.where(Group.tenant_id == scope_id)
         tenant_count = 1
         session_user_count = (
-            db.scalar(
-                select(func.count())
-                .select_from(UserTenantMembership)
-                .join(UserMembershipProfile, UserMembershipProfile.tenant_membership_id == UserTenantMembership.id)
-                .where(
-                    UserTenantMembership.tenant_id == scope_id,
-                    UserTenantMembership.status == "active",
-                    UserMembershipProfile.sessions_count > 0,
-                )
-            )
+            db.execute(
+                text(
+                    """
+                    select count(distinct m.user_id_hash)
+                    from user_tenant_membership m
+                    join (
+                      select distinct user_id_hash
+                      from conversations
+                    ) conv on conv.user_id_hash = m.user_id_hash
+                    where m.tenant_id = :tenant_id
+                      and m.status = 'active'
+                    """
+                ),
+                {"tenant_id": scope_id},
+            ).scalar()
             or 0
         )
     elif scope_type == "group":
@@ -2259,31 +2898,43 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
         active_users_query = active_users_query.where(UserTenantMembership.tenant_id.in_(tenant_ids))
         active_groups_query = active_groups_query.where(Group.tenant_id.in_(tenant_ids))
         tenant_count = len(tenant_ids)
-        session_user_count = (
-            db.scalar(
-                select(func.count())
-                .select_from(UserTenantMembership)
-                .join(UserMembershipProfile, UserMembershipProfile.tenant_membership_id == UserTenantMembership.id)
-                .where(
-                    UserTenantMembership.tenant_id.in_(tenant_ids),
-                    UserTenantMembership.status == "active",
-                    UserMembershipProfile.sessions_count > 0,
-                )
+        if tenant_ids:
+            session_user_count = (
+                db.execute(
+                    text(
+                        """
+                        select count(distinct m.user_id_hash)
+                        from user_tenant_membership m
+                        join (
+                          select distinct user_id_hash
+                          from conversations
+                        ) conv on conv.user_id_hash = m.user_id_hash
+                        where m.tenant_id in :tenant_ids
+                          and m.status = 'active'
+                        """
+                    ).bindparams(bindparam("tenant_ids", expanding=True)),
+                    {"tenant_ids": tenant_ids},
+                ).scalar()
+                or 0
             )
-            or 0
-        )
+        else:
+            session_user_count = 0
     else:
         tenant_count = db.scalar(tenant_count_query) or 0
         session_user_count = (
-            db.scalar(
-                select(func.count())
-                .select_from(UserTenantMembership)
-                .join(UserMembershipProfile, UserMembershipProfile.tenant_membership_id == UserTenantMembership.id)
-                .where(
-                    UserTenantMembership.status == "active",
-                    UserMembershipProfile.sessions_count > 0,
+            db.execute(
+                text(
+                    """
+                    select count(distinct m.user_id_hash)
+                    from user_tenant_membership m
+                    join (
+                      select distinct user_id_hash
+                      from conversations
+                    ) conv on conv.user_id_hash = m.user_id_hash
+                    where m.status = 'active'
+                    """
                 )
-            )
+            ).scalar()
             or 0
         )
 
@@ -2452,32 +3103,91 @@ def upsert_user_membership_profile(
 ) -> UserMembershipProfile:
     profile = membership.profile or UserMembershipProfile(tenant_membership_id=membership.id)
     for key in [
-        "first_name",
-        "last_name",
-        "email",
         "title",
         "initial_user_type",
-        "utilization_level",
-        "sessions_count",
-        "avg_improvement_pct",
     ]:
         if key in payload and payload[key] is not None:
             setattr(profile, key, payload[key])
-    if "last_activity_at" in payload:
-        profile.last_activity_at = payload["last_activity_at"]  # type: ignore[assignment]
     db.add(profile)
     membership.profile = profile
     return profile
 
 
-def upsert_admin_profile(db: Session, admin: AdminUser, payload: dict[str, object]) -> AdminProfile:
-    profile = admin.profile or AdminProfile(admin_user_id=admin.id)
-    for key in ["display_name", "email"]:
-        if key in payload:
-            setattr(profile, key, payload[key])
-    db.add(profile)
-    admin.profile = profile
-    return profile
+def ensure_admin_auth_identity(
+    db: Session,
+    *,
+    user_id_hash: str,
+    email: str | None = None,
+    display_name: str | None = None,
+    is_active: bool = True,
+) -> bool:
+    synced = sync_admin_identity_to_auth_user(
+        db,
+        user_id_hash=user_id_hash,
+        email=email,
+        display_name=display_name,
+    )
+    if synced:
+        return True
+
+    normalized_email = normalize_email(email)
+    if normalized_email is None:
+        return False
+
+    conflicting_user = db.execute(
+        text(
+            """
+            select id
+            from auth_users
+            where lower(email) = :email
+              and user_id_hash != :user_id_hash
+            order by id desc
+            limit 1
+            """
+        ),
+        {"email": normalized_email, "user_id_hash": user_id_hash},
+    ).scalar_one_or_none()
+    if conflicting_user is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already assigned to a different auth user",
+        )
+
+    db.execute(
+        text(
+            """
+            insert into auth_users (
+              email,
+              user_id_hash,
+              display_name,
+              tenant_id,
+              is_active,
+              created_at,
+              updated_at,
+              last_login_at
+            ) values (
+              :email,
+              :user_id_hash,
+              :display_name,
+              :tenant_id,
+              :is_active,
+              :created_at,
+              :updated_at,
+              null
+            )
+            """
+        ),
+        {
+            "email": normalized_email,
+            "user_id_hash": user_id_hash,
+            "display_name": display_name or normalized_email,
+            "tenant_id": "",
+            "is_active": is_active,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        },
+    )
+    return True
 
 
 def get_or_create_reseller_defaults(db: Session, reseller: ResellerPartner) -> ResellerTenantDefaults:
@@ -2562,11 +3272,18 @@ def apply_reseller_defaults_to_tenant(
         or (defaults.default_provider_type and defaults.default_model_name)
     )
     if should_seed_llm and tenant.llm_config is None:
+        provider_type = defaults.default_provider_type
+        model_name = defaults.default_model_name
+        endpoint_url = defaults.default_endpoint_url
+        if defaults.default_platform_managed_config_id:
+            provider_type = None
+            model_name = None
+            endpoint_url = None
         llm_config = TenantLLMConfig(
             tenant_id=tenant.id,
-            provider_type=defaults.default_provider_type or "",
-            model_name=defaults.default_model_name or "",
-            endpoint_url=defaults.default_endpoint_url,
+            provider_type=provider_type,
+            model_name=model_name,
+            endpoint_url=endpoint_url,
             platform_managed_config_id=defaults.default_platform_managed_config_id,
             credential_mode=defaults.default_credential_mode,
             transformation_enabled=defaults.default_transformation_enabled,
@@ -2577,9 +3294,9 @@ def apply_reseller_defaults_to_tenant(
         if defaults.default_platform_managed_config_id:
             platform_config = db.get(PlatformManagedLlmConfig, defaults.default_platform_managed_config_id)
             if platform_config is not None:
-                llm_config.provider_type = platform_config.provider_type
-                llm_config.model_name = platform_config.model_name
-                llm_config.endpoint_url = platform_config.endpoint_url
+                llm_config.provider_type = None
+                llm_config.model_name = None
+                llm_config.endpoint_url = None
                 llm_config.secret_reference = platform_config.secret_reference
                 llm_config.api_key_masked = platform_config.api_key_masked
                 llm_config.secret_source = platform_config.secret_source
@@ -2625,8 +3342,13 @@ def seed_database(db: Session) -> None:
         db.add(admin)
         db.flush()
 
-    if admin.profile is None:
-        db.add(AdminProfile(admin_user_id=admin.id, display_name="Michael Anderson", email="michael@example.com"))
+    ensure_admin_auth_identity(
+        db,
+        user_id_hash=admin.user_id_hash,
+        email="michael@example.com",
+        display_name="Michael Anderson",
+        is_active=True,
+    )
 
     if not admin.scopes:
         db.add(AdminScope(admin_user_id=admin.id, scope_type="global"))

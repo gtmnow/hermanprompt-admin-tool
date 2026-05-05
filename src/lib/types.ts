@@ -56,8 +56,23 @@ export type ResellerPartner = {
   is_active: boolean;
   service_tier_definition_id: string | null;
   service_tier: ServiceTierDefinition | null;
+  organization_count: number;
+  total_user_count: number;
+  partner_admin_count: number;
   created_at: string;
   updated_at: string;
+};
+
+export type ResellerLifecycleAction = "activate" | "inactivate" | "delete";
+
+export type ResellerLifecycleActionResult = {
+  reseller_id: string;
+  action: ResellerLifecycleAction;
+  resulting_status: "active" | "inactive" | "deleted";
+  impacted_organization_count: number;
+  impacted_user_count: number;
+  impacted_partner_admin_count: number;
+  message: string;
 };
 
 export type ResellerTenantDefaults = {

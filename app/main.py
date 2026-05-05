@@ -10,7 +10,8 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.db import Base, engine, SessionLocal
 from app import models  # noqa: F401
-from app.services import ensure_additive_schema_extensions, seed_database
+from app.schema_contract import validate_schema_contract
+from app.services import seed_database
 
 settings = get_settings()
 project_root = Path(__file__).resolve().parent.parent
@@ -38,9 +39,14 @@ if (frontend_dist_dir / "assets").exists():
 
 @app.on_event("startup")
 def startup() -> None:
-    if settings.bootstrap_schema:
+    if settings.effective_herman_db_canonical_mode:
+        validate_schema_contract(
+            engine=engine,
+            version_table=settings.herman_db_version_table,
+            allowed_revisions=settings.herman_db_allowed_revisions,
+        )
+    elif settings.bootstrap_schema:
         Base.metadata.create_all(bind=engine)
-    ensure_additive_schema_extensions()
     if settings.seed_demo_data:
         with SessionLocal() as db:
             seed_database(db)
