@@ -120,12 +120,17 @@ export function DashboardPage() {
     const outputSavingsUsd = outputTokens * savingsRate * GPT_55_OUTPUT_COST_PER_TOKEN;
     return sum + adminSavingsUsd + outputSavingsUsd;
   }, 0);
+  const totalObservedTokens = totalTokenTrend.reduce((sum, point) => sum + Number(point.value ?? 0), 0);
+  const totalEstimatedSavedTokens = tokenEfficiencyTrend.reduce((sum, point) => sum + Number(point.value ?? 0), 0);
+  const tokenSavingsPercent =
+    totalObservedTokens > 0 ? Math.min(Math.max((totalEstimatedSavedTokens / totalObservedTokens) * 100, 0), 100) : 0;
   const formattedTokenSavings = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(tokenSavingsUsd);
+  const formattedTokenSavingsPercent = `${tokenSavingsPercent.toFixed(1)}%`;
 
   return (
     <div className="stack">
@@ -165,7 +170,10 @@ export function DashboardPage() {
         <div className="card metric-card">
           <CardHelpTooltip text="Estimates dollar savings by applying the dashboard's token-efficiency estimate to admin input tokens and user response output tokens, then pricing those saved tokens at current GPT-5.5 API rates." />
           <div className="metric-card__label">Token Savings</div>
-          <div className="metric-card__value">{formattedTokenSavings}</div>
+          <div className="metric-card__value" style={{ fontSize: 30, lineHeight: 1.2 }}>
+            <span>{formattedTokenSavingsPercent}</span>
+            <span style={{ display: "block", fontSize: 20, marginTop: 6 }}>{formattedTokenSavings}</span>
+          </div>
           <div className="metric-card__trend">Estimated with GPT-5.5 pricing for {selectedRangeLabel.toLowerCase()}</div>
         </div>
       </div>
