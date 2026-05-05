@@ -7,6 +7,7 @@ import { Link } from "react-router-dom";
 import { useOrganizationScope } from "../../app/providers/OrganizationScopeProvider";
 import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
+import { MultiTrendChart } from "../../components/charts/MultiTrendChart";
 import { SimpleTrendChart } from "../../components/charts/SimpleTrendChart";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import {
@@ -92,6 +93,16 @@ export function DashboardPage() {
   const selectedRangeLabel = getRangeLabel(rangeKey);
   const usageTrend = report.charts.find((chart) => chart.label === "Usage Trend")?.points ?? [];
   const improvementTrend = report.charts.find((chart) => chart.label === "Improvement Trend")?.points ?? [];
+  const adminTokenTrend = report.charts.find((chart) => chart.label === "Admin Token Consumption Trend")?.points ?? [];
+  const userResponseTokenTrend = report.charts.find((chart) => chart.label === "User Response Token Consumption Trend")?.points ?? [];
+  const totalTokenTrend = report.charts.find((chart) => chart.label === "Total Token Utilization Trend")?.points ?? [];
+  const tokenEfficiencyTrend = report.charts.find((chart) => chart.label === "User Token Efficiency Trend")?.points ?? [];
+  const tokenUtilizationTrend = totalTokenTrend.map((point, index) => ({
+    bucket: point.bucket,
+    adminTokenConsumption: adminTokenTrend[index]?.value ?? 0,
+    userResponseConsumption: userResponseTokenTrend[index]?.value ?? 0,
+    totalTokenConsumption: point.value ?? 0,
+  }));
 
   return (
     <div className="stack">
@@ -160,7 +171,7 @@ export function DashboardPage() {
       <div className="grid grid--two">
         <SimpleTrendChart
           title="Usage Trend"
-          subtitle={`Captured HermanPrompt conversation activity for ${selectedRangeLabel.toLowerCase()}`}
+          subtitle={`Conversation activity for ${selectedRangeLabel.toLowerCase()}`}
           tooltipText="Shows how usage volume changes over time for the current dashboard scope and date range."
           data={usageTrend}
           color="#0284C7"
@@ -168,10 +179,33 @@ export function DashboardPage() {
         />
         <SimpleTrendChart
           title="Improvement Trend"
-          subtitle={`Average delta from initial to final prompt score across ${selectedScopeLabel}`}
+          subtitle={`Average improvement from initial to final prompt score across ${selectedScopeLabel}`}
           tooltipText="Shows whether prompt quality improvement is rising, flattening, or falling over the selected period."
           data={improvementTrend}
           emptyMessage="No scored sessions were found in this reporting window, so improvement is not plotted yet."
+        />
+      </div>
+
+      <div className="grid grid--two">
+        <MultiTrendChart
+          title="Total Token Utilization"
+          subtitle={`Token consumption for ${selectedRangeLabel.toLowerCase()}`}
+          tooltipText="Shows actual token usage from prompt transformation requests in the current dashboard scope, separated into admin-side token load, user response token load, and total combined token consumption."
+          data={tokenUtilizationTrend}
+          series={[
+            { key: "adminTokenConsumption", label: "Admin Token Consumption", color: "#0284C7" },
+            { key: "userResponseConsumption", label: "User Response Consumption", color: "#16A34A" },
+            { key: "totalTokenConsumption", label: "Total Token Consumption", color: "#F97316" },
+          ]}
+          emptyMessage="Not enough recorded session activity is available to estimate token utilization yet."
+        />
+        <SimpleTrendChart
+          title="User Token Efficiency"
+          subtitle={`Estimated token savings from prompt improvement across ${selectedScopeLabel}`}
+          tooltipText="Estimates token savings by applying the average prompt-improvement percentage to the observed total token load for each bucket. This remains a temporary efficiency proxy until the prompt transformation tool emits direct token-savings measurements."
+          data={tokenEfficiencyTrend}
+          color="#7C3AED"
+          emptyMessage="No prompt transformation activity was found in this reporting window, so token-efficiency estimates are not plotted yet."
         />
       </div>
 

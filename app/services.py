@@ -1106,6 +1106,113 @@ def build_time_buckets(start_at: datetime, end_at: datetime, granularity: str) -
     return buckets
 
 
+def parse_token_usage_payload(value: object | None) -> dict[str, object] | None:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def coerce_token_total(value: object | None) -> int:
+    try:
+        return int(round(float(value))) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def extract_token_usage_totals(payload: object | None) -> dict[str, int]:
+    parsed = parse_token_usage_payload(payload)
+    if not parsed:
+        return {"admin_tokens": 0, "user_response_tokens": 0, "total_tokens": 0}
+
+    admin = parsed.get("admin")
+    final_response = parsed.get("final_response")
+    providers = parsed.get("providers")
+
+    admin_tokens = coerce_token_total(admin.get("total_tokens")) if isinstance(admin, dict) else 0
+    user_response_tokens = (
+        coerce_token_total(final_response.get("total_tokens")) if isinstance(final_response, dict) else 0
+    )
+
+    if admin_tokens == 0 or user_response_tokens == 0:
+        if isinstance(providers, list):
+            for provider_item in providers:
+                if not isinstance(provider_item, dict):
+                    continue
+                category = str(provider_item.get("category") or "")
+                total_tokens = coerce_token_total(provider_item.get("total_tokens"))
+                if category == "admin":
+                    admin_tokens += total_tokens
+                elif category == "final_response":
+                    user_response_tokens += total_tokens
+
+    return {
+        "admin_tokens": admin_tokens,
+        "user_response_tokens": user_response_tokens,
+        "total_tokens": admin_tokens + user_response_tokens,
+    }
+
+
+def aggregate_token_usage_rows(
+    rows: list[dict[str, object]],
+    *,
+    buckets: list[str],
+    granularity: str,
+    improvement_by_bucket: dict[str, float | None],
+    fallback_improvement: float,
+) -> dict[str, list[dict[str, float | None]]]:
+    admin_by_bucket = {bucket: 0 for bucket in buckets}
+    user_response_by_bucket = {bucket: 0 for bucket in buckets}
+    total_by_bucket = {bucket: 0 for bucket in buckets}
+
+    for row in rows:
+        created_at = parse_datetime(row.get("created_at"))
+        if created_at is None:
+            continue
+        created_utc = created_at.astimezone(timezone.utc) if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        if granularity == "hour":
+            bucket = created_utc.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:00:00Z")
+        elif granularity == "month":
+            bucket = created_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-01")
+        else:
+            bucket = created_utc.strftime("%Y-%m-%d")
+        if bucket not in total_by_bucket:
+            continue
+
+        totals = extract_token_usage_totals(row.get("token_usage_json"))
+        admin_by_bucket[bucket] += totals["admin_tokens"]
+        user_response_by_bucket[bucket] += totals["user_response_tokens"]
+        total_by_bucket[bucket] += totals["total_tokens"]
+
+    admin_series = [{"bucket": bucket, "value": float(admin_by_bucket[bucket])} for bucket in buckets]
+    user_response_series = [{"bucket": bucket, "value": float(user_response_by_bucket[bucket])} for bucket in buckets]
+    total_series = [{"bucket": bucket, "value": float(total_by_bucket[bucket])} for bucket in buckets]
+    efficiency_series = []
+    for bucket in buckets:
+        improvement_pct = improvement_by_bucket.get(bucket)
+        if improvement_pct is None:
+            improvement_pct = fallback_improvement
+        reduction = max(0.0, min(100.0, float(improvement_pct or 0.0))) / 100.0
+        efficiency_series.append(
+            {
+                "bucket": bucket,
+                "value": round(total_by_bucket[bucket] * reduction, 2) if total_by_bucket[bucket] > 0 else 0.0,
+            }
+        )
+
+    return {
+        "admin_token_series": admin_series,
+        "user_response_token_series": user_response_series,
+        "total_token_series": total_series,
+        "token_efficiency_series": efficiency_series,
+    }
+
+
 def has_live_snapshot(db: Session) -> bool:
     try:
         count = db.execute(text("select count(*) from auth_users")).scalar()
@@ -2689,6 +2796,8 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
         }[granularity]
         timestamp_predicate = "datetime({column}) between datetime(:start) and datetime(:end)"
 
+    token_rows: list[dict[str, object]] = []
+
     if has_live_snapshot(db):
         if scope_type == "organization" and snapshot_tenant_id:
             params = {"tenant_id": snapshot_tenant_id, "start": start_at.isoformat(), "end": end_at.isoformat()}
@@ -2771,6 +2880,24 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
                 ),
                 params,
             ).mappings().all()
+            if table_exists(db, "prompt_transform_requests") and table_exists(db, "user_tenant_membership"):
+                token_rows = [
+                    dict(row)
+                    for row in db.execute(
+                        text(
+                            """
+                            select ptr.created_at, ptr.token_usage_json
+                            from prompt_transform_requests ptr
+                            join user_tenant_membership m on m.user_id_hash = ptr.user_id_hash
+                            where m.tenant_id = :tenant_id
+                              and m.status != 'deleted'
+                              and ptr.token_usage_json is not null
+                              and {time_predicate}
+                            """.format(time_predicate=timestamp_predicate.format(column="ptr.created_at"))
+                        ),
+                        {"tenant_id": scope_id, "start": start_at.isoformat(), "end": end_at.isoformat()},
+                    ).mappings().all()
+                ]
         elif scope_type == "global":
             active_users = int(db.execute(text("select count(*) from auth_users where is_active")).scalar() or 0)
             session_count = int(
@@ -2835,6 +2962,21 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
                 ),
                 {"start": start_at.isoformat(), "end": end_at.isoformat()},
             ).mappings().all()
+            if table_exists(db, "prompt_transform_requests"):
+                token_rows = [
+                    dict(row)
+                    for row in db.execute(
+                        text(
+                            """
+                            select ptr.created_at, ptr.token_usage_json
+                            from prompt_transform_requests ptr
+                            where ptr.token_usage_json is not null
+                              and {time_predicate}
+                            """.format(time_predicate=timestamp_predicate.format(column="ptr.created_at"))
+                        ),
+                        {"start": start_at.isoformat(), "end": end_at.isoformat()},
+                    ).mappings().all()
+                ]
         else:
             conversation_rows = []
             improvement_rows = []
@@ -2852,6 +2994,13 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
             buckets = build_time_buckets(start_at, end_at, granularity)
             usage_series = [{"bucket": bucket, "value": usage_by_bucket.get(bucket, 0)} for bucket in buckets]
             improvement_series = [{"bucket": bucket, "value": improvement_by_bucket.get(bucket)} for bucket in buckets]
+            token_series = aggregate_token_usage_rows(
+                token_rows,
+                buckets=buckets,
+                granularity=granularity,
+                improvement_by_bucket=improvement_by_bucket,
+                fallback_improvement=round(average_improvement, 2),
+            )
             return {
                 "active_users": active_users,
                 "session_count": session_count,
@@ -2860,6 +3009,7 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
                 "average_improvement": round(average_improvement, 2),
                 "usage_series": usage_series,
                 "improvement_series": improvement_series,
+                **token_series,
             }
 
     active_users_query = select(func.count()).select_from(UserTenantMembership)
@@ -2887,6 +3037,24 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
             ).scalar()
             or 0
         )
+        if table_exists(db, "prompt_transform_requests"):
+            token_rows = [
+                dict(row)
+                for row in db.execute(
+                    text(
+                        """
+                        select ptr.created_at, ptr.token_usage_json
+                        from prompt_transform_requests ptr
+                        join user_tenant_membership m on m.user_id_hash = ptr.user_id_hash
+                        where m.tenant_id = :tenant_id
+                          and m.status != 'deleted'
+                          and ptr.token_usage_json is not null
+                          and {time_predicate}
+                        """.format(time_predicate=timestamp_predicate.format(column="ptr.created_at"))
+                    ),
+                    {"tenant_id": scope_id, "start": start_at.isoformat(), "end": end_at.isoformat()},
+                ).mappings().all()
+            ]
     elif scope_type == "group":
         memberships = db.scalar(
             select(func.count()).select_from(UserGroupMembership).where(UserGroupMembership.group_id == scope_id)
@@ -2910,6 +3078,23 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
             ).scalar()
             or 0
         )
+        if table_exists(db, "prompt_transform_requests"):
+            token_rows = [
+                dict(row)
+                for row in db.execute(
+                    text(
+                        """
+                        select ptr.created_at, ptr.token_usage_json
+                        from prompt_transform_requests ptr
+                        join user_group_membership gm on gm.user_id_hash = ptr.user_id_hash
+                        where gm.group_id = :group_id
+                          and ptr.token_usage_json is not null
+                          and {time_predicate}
+                        """.format(time_predicate=timestamp_predicate.format(column="ptr.created_at"))
+                    ),
+                    {"group_id": scope_id, "start": start_at.isoformat(), "end": end_at.isoformat()},
+                ).mappings().all()
+            ]
     elif scope_type == "reseller":
         tenant_ids = list(
             db.scalars(select(Tenant.id).where(Tenant.reseller_partner_id == scope_id))
@@ -2935,6 +3120,24 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
                 ).scalar()
                 or 0
             )
+            if table_exists(db, "prompt_transform_requests"):
+                token_rows = [
+                    dict(row)
+                    for row in db.execute(
+                        text(
+                            """
+                            select ptr.created_at, ptr.token_usage_json
+                            from prompt_transform_requests ptr
+                            join user_tenant_membership m on m.user_id_hash = ptr.user_id_hash
+                            where m.tenant_id in :tenant_ids
+                              and m.status != 'deleted'
+                              and ptr.token_usage_json is not null
+                              and {time_predicate}
+                            """.format(time_predicate=timestamp_predicate.format(column="ptr.created_at"))
+                        ).bindparams(bindparam("tenant_ids", expanding=True)),
+                        {"tenant_ids": tenant_ids, "start": start_at.isoformat(), "end": end_at.isoformat()},
+                    ).mappings().all()
+                ]
         else:
             session_count = 0
     else:
@@ -2955,6 +3158,21 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
             ).scalar()
             or 0
         )
+        if table_exists(db, "prompt_transform_requests"):
+            token_rows = [
+                dict(row)
+                for row in db.execute(
+                    text(
+                        """
+                        select ptr.created_at, ptr.token_usage_json
+                        from prompt_transform_requests ptr
+                        where ptr.token_usage_json is not null
+                          and {time_predicate}
+                        """.format(time_predicate=timestamp_predicate.format(column="ptr.created_at"))
+                    ),
+                    {"start": start_at.isoformat(), "end": end_at.isoformat()},
+                ).mappings().all()
+            ]
 
     if scope_type != "group":
         active_users = db.scalar(active_users_query.where(UserTenantMembership.status == "active")) or 0
@@ -2977,6 +3195,18 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
             }
         )
 
+    improvement_by_bucket = {
+        item["bucket"]: float(item["value"]) if item["value"] is not None else None
+        for item in improvement_series
+    }
+    token_series = aggregate_token_usage_rows(
+        token_rows,
+        buckets=buckets,
+        granularity=granularity,
+        improvement_by_bucket=improvement_by_bucket,
+        fallback_improvement=round(8.5 + min(active_users, 20) * 0.7, 2),
+    )
+
     return {
         "active_users": active_users,
         "session_count": session_count,
@@ -2985,6 +3215,7 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
         "average_improvement": round(8.5 + min(active_users, 20) * 0.7, 2),
         "usage_series": usage_series,
         "improvement_series": improvement_series,
+        **token_series,
     }
 
 

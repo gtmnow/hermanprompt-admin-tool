@@ -58,7 +58,23 @@ def run_report(
             ChartSeries(
                 label="Improvement Trend",
                 points=[ChartSeriesPoint(bucket=item["bucket"], value=item["value"]) for item in metrics["improvement_series"]],
-            )
+            ),
+            ChartSeries(
+                label="Admin Token Consumption Trend",
+                points=[ChartSeriesPoint(bucket=item["bucket"], value=item["value"]) for item in metrics["admin_token_series"]],
+            ),
+            ChartSeries(
+                label="User Response Token Consumption Trend",
+                points=[ChartSeriesPoint(bucket=item["bucket"], value=item["value"]) for item in metrics["user_response_token_series"]],
+            ),
+            ChartSeries(
+                label="Total Token Utilization Trend",
+                points=[ChartSeriesPoint(bucket=item["bucket"], value=item["value"]) for item in metrics["total_token_series"]],
+            ),
+            ChartSeries(
+                label="User Token Efficiency Trend",
+                points=[ChartSeriesPoint(bucket=item["bucket"], value=item["value"]) for item in metrics["token_efficiency_series"]],
+            ),
         ],
         tables=[
             {"metric": "tenant_count", "value": metrics["tenant_count"]},
