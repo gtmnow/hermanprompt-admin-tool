@@ -157,20 +157,20 @@ export function DashboardPage() {
         </div>
         <div className="card metric-card">
           <CardHelpTooltip text="Shows how many captured HermanPrompt sessions occurred in the selected dashboard scope and date range." />
-          <div className="metric-card__label">Sessions</div>
+          <div className="metric-card__label">Total User Sessions</div>
           <div className="metric-card__value">{sessionCount}</div>
-          <div className="metric-card__trend">Captured HermanPrompt sessions in {selectedRangeLabel.toLowerCase()}</div>
+          <div className="metric-card__trend">User sessions in {selectedRangeLabel.toLowerCase()}</div>
         </div>
         <div className="card metric-card">
           <CardHelpTooltip text="Shows the average improvement between initial and final prompt scores for the selected reporting period." />
-          <div className="metric-card__label">Avg Improvement</div>
+          <div className="metric-card__label">Avg. Prompt Quality Improvement</div>
           <div className="metric-card__value">{averageImprovementKpi}</div>
           <div className="metric-card__trend">Average improvement from initial to final prompt score for {selectedRangeLabel.toLowerCase()}</div>
         </div>
         <div className="card metric-card">
           <CardHelpTooltip text="Estimates dollar savings by applying the dashboard's token-efficiency estimate to admin input tokens and user response output tokens, then pricing those saved tokens at current GPT-5.5 API rates." />
           <div className="metric-card__label">Token Savings</div>
-          <div className="metric-card__value" style={{ fontSize: 30, lineHeight: 1.2 }}>
+          <div className="metric-card__value" style={{ lineHeight: 1.2 }}>
             <span>{formattedTokenSavingsPercent}</span>
             <span style={{ display: "block", fontSize: 20, marginTop: 6 }}>{formattedTokenSavings}</span>
           </div>
