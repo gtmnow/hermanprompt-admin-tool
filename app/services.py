@@ -1153,7 +1153,7 @@ def build_display_name(
 
 def auth_tenant_candidates(tenant: Tenant) -> list[str]:
     candidates: list[str] = []
-    for candidate in [tenant.external_customer_id, tenant.id, tenant.tenant_key]:
+    for candidate in [tenant.id, tenant.external_customer_id, tenant.tenant_key]:
         if candidate and candidate not in candidates:
             candidates.append(candidate)
     return candidates
@@ -1167,10 +1167,10 @@ def resolve_snapshot_tenant_id(db: Session, tenant: Tenant | None = None) -> str
     snapshot_tenant_ids = get_snapshot_tenant_ids(db)
     if not snapshot_tenant_ids:
         return None
-    if tenant and tenant.external_customer_id and tenant.external_customer_id in snapshot_tenant_ids:
-        return tenant.external_customer_id
     if tenant and tenant.id in snapshot_tenant_ids:
         return tenant.id
+    if tenant and tenant.external_customer_id and tenant.external_customer_id in snapshot_tenant_ids:
+        return tenant.external_customer_id
     if tenant and tenant.tenant_key in snapshot_tenant_ids:
         return tenant.tenant_key
     if tenant is None and len(snapshot_tenant_ids) == 1:
