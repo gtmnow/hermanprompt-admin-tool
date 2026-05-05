@@ -36,7 +36,7 @@ from app.schemas import (
     TenantValidationResult,
 )
 from app.security import Principal, require_permission
-from app.services.prompt_transformer import PromptTransformerClient
+from app.prompt_transformer_client import PromptTransformerClient
 from app.secret_vault import resolve_secret_reference, store_managed_secret
 from app.services import (
     apply_reseller_defaults_to_tenant,
