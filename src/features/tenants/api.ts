@@ -25,11 +25,13 @@ import type {
   SystemOverview,
   TenantLifecycleAction,
   TenantLifecycleActionResult,
+  TenantKnowledgeSummary,
   TenantOnboarding,
   TenantPortalConfig,
   TenantSummary,
   TenantValidationResult,
   UserMembership,
+  RagQuotaPolicy,
 } from "../../lib/types";
 
 export const tenantApi = {
@@ -192,6 +194,26 @@ export const tenantApi = {
   updateRuntimeSettings(tenantId: string, payload: Record<string, unknown>) {
     return api.putResource(`/tenants/${tenantId}/runtime-settings`, payload);
   },
+  getTenantKnowledge(tenantId: string) {
+    return api.getResource<TenantKnowledgeSummary>(`/tenants/${tenantId}/knowledge`);
+  },
+  uploadTenantKnowledgeDocument(tenantId: string, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return api.postFormResource<TenantKnowledgeSummary>(`/tenants/${tenantId}/knowledge/documents`, formData);
+  },
+  deleteTenantKnowledgeDocument(tenantId: string, documentId: string) {
+    return api.deleteResource<TenantKnowledgeSummary>(`/tenants/${tenantId}/knowledge/documents/${documentId}`);
+  },
+  reprocessTenantKnowledgeDocument(tenantId: string, documentId: string) {
+    return api.postResource<TenantKnowledgeSummary>(`/tenants/${tenantId}/knowledge/documents/${documentId}/reprocess`, {});
+  },
+  updateTenantKnowledgeCollection(tenantId: string, payload: Record<string, unknown>) {
+    return api.patchResource<TenantKnowledgeSummary>(`/tenants/${tenantId}/knowledge/collection`, payload);
+  },
+  updateTenantRagQuotaOverride(tenantId: string, payload: Record<string, unknown>) {
+    return api.putResource<RagQuotaPolicy>(`/tenants/${tenantId}/rag-quotas/override`, payload);
+  },
   createGroup(payload: Record<string, unknown>) {
     return api.postResource<Group>("/groups", payload);
   },
@@ -255,6 +277,15 @@ export const tenantApi = {
   },
   updatePromptUiInstance(instanceId: string, payload: Record<string, unknown>) {
     return api.patchResource<PromptUiInstanceConfig>(`/settings/prompt-ui-instances/${instanceId}`, payload);
+  },
+  listRagQuotaPolicies() {
+    return api.getList<RagQuotaPolicy>("/settings/rag-quotas");
+  },
+  updateDefaultRagQuotaPolicy(payload: Record<string, unknown>) {
+    return api.putResource<RagQuotaPolicy>("/settings/rag-quotas/default", payload);
+  },
+  updateServiceTierRagQuotaPolicy(serviceTierId: string, payload: Record<string, unknown>) {
+    return api.putResource<RagQuotaPolicy>(`/settings/rag-quotas/service-tier/${serviceTierId}`, payload);
   },
   listServiceTiers(filters?: { scope_type?: "organization" | "reseller"; include_inactive?: boolean }) {
     const params = new URLSearchParams();

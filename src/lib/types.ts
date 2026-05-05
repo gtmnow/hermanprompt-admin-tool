@@ -169,11 +169,76 @@ export type TenantOnboarding = {
   groups_created: boolean;
   users_uploaded: boolean;
   admin_assigned: boolean;
+  knowledge_configured: boolean;
+  knowledge_ready: boolean;
   first_login_detected: boolean;
   first_transform_detected: boolean;
   first_score_detected: boolean;
   onboarding_status: OnboardingStatus;
   updated_at: string;
+};
+
+export type RagQuotaPolicy = {
+  id: string;
+  policy_key: string;
+  scope_target: "global_default" | "service_tier" | "tenant_override";
+  service_tier_definition_id: string | null;
+  tenant_id: string | null;
+  user_type: string | null;
+  org_max_file_bytes: number;
+  user_max_file_bytes: number;
+  org_max_document_count: number;
+  user_max_document_count: number;
+  org_max_total_bytes: number;
+  user_max_total_bytes: number;
+  org_max_extracted_text_bytes: number;
+  user_max_extracted_text_bytes: number;
+  org_max_chunks_per_document: number;
+  user_max_chunks_per_document: number;
+  org_max_retrieved_chunks: number;
+  user_max_retrieved_chunks: number;
+  max_retrieved_chunks_total: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TenantKnowledgeSummary = {
+  collection: {
+    id: string;
+    retrieval_enabled: boolean;
+    is_active: boolean;
+    max_results: number | null;
+  };
+  limits: {
+    policy_source: "Default" | "Service Tier" | "Organization Override";
+    policy_key: string;
+    max_file_bytes: number;
+    max_document_count: number;
+    max_total_bytes: number;
+    max_extracted_text_bytes: number;
+    max_chunks_per_document: number;
+    max_retrieved_chunks: number;
+    max_retrieved_chunks_total: number;
+  };
+  usage: {
+    document_count: number;
+    total_bytes: number;
+    ready_documents: number;
+    processing_documents: number;
+    failed_documents: number;
+    disabled_documents: number;
+  };
+  documents: Array<{
+    id: string;
+    filename: string;
+    media_type: string;
+    size_bytes: number;
+    status: string;
+    status_message: string | null;
+    uploaded_at: string;
+    processed_at: string | null;
+  }>;
 };
 
 export type TenantValidationResult = {

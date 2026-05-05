@@ -53,7 +53,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HERMAN_DB_VERSION_TABLE"),
     )
     herman_db_allowed_revisions_raw: str = Field(
-        default="20260504_0006,20260504_0007,20260504_0008,20260504_0009,20260505_0010,20260505_0011,20260505_0012,20260505_0013,20260505_0014",
+        default="20260504_0006,20260504_0007,20260504_0008,20260504_0009,20260505_0010,20260505_0011,20260505_0012,20260505_0013,20260505_0014,20260505_0015",
         validation_alias=AliasChoices("HERMAN_DB_ALLOWED_REVISIONS"),
     )
     launch_secret: str = Field(
@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     )
     launch_token_use: str = "admin_launch"
     user_hash_key: str = "dev-user-hash-key"
+    prompt_transformer_url: str = "http://127.0.0.1:8001"
+    prompt_transformer_api_key: str | None = None
+    prompt_transformer_client_id: str = "hermanadmin"
 
     model_config = SettingsConfigDict(
         env_prefix="HERMAN_ADMIN_",

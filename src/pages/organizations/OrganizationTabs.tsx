@@ -137,6 +137,16 @@ function useDetailContext() {
   return useOutletContext<DetailOutletContext>();
 }
 
+function formatBytes(value: number) {
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+  return `${value} B`;
+}
+
 function useTenantInvalidate(tenantId: string) {
   const queryClient = useQueryClient();
 
@@ -1314,6 +1324,8 @@ export function OrganizationOnboardingTab() {
             ["Organization created", onboarding?.tenant_created],
             ["LLM configured", onboarding?.llm_configured],
             ["LLM validated", onboarding?.llm_validated],
+            ["Knowledge configured", onboarding?.knowledge_configured],
+            ["Knowledge ready", onboarding?.knowledge_ready],
             ["Groups created", onboarding?.groups_created],
             ["Users uploaded", onboarding?.users_uploaded],
             ["Admin assigned", onboarding?.admin_assigned],
@@ -1380,6 +1392,207 @@ export function OrganizationOnboardingTab() {
             Open activation wizard
           </Link>
         </div>
+      </div>
+    </div>
+  );
+}
+
+export function OrganizationKnowledgeTab() {
+  const { tenant, onboarding } = useDetailContext();
+  const tenantId = tenant.tenant.id;
+  const invalidateTenant = useTenantInvalidate(tenantId);
+  const [orgOverrideForm, setOrgOverrideForm] = useState({
+    org_max_file_bytes: 25 * 1024 * 1024,
+    user_max_file_bytes: 10 * 1024 * 1024,
+    org_max_document_count: 100,
+    user_max_document_count: 20,
+    org_max_total_bytes: 250 * 1024 * 1024,
+    user_max_total_bytes: 50 * 1024 * 1024,
+    org_max_extracted_text_bytes: 1024 * 1024,
+    user_max_extracted_text_bytes: 512 * 1024,
+    org_max_chunks_per_document: 500,
+    user_max_chunks_per_document: 200,
+    org_max_retrieved_chunks: 4,
+    user_max_retrieved_chunks: 2,
+    max_retrieved_chunks_total: 6,
+    is_active: true,
+  });
+
+  const knowledgeQuery = useQuery({
+    queryKey: ["tenant-knowledge", tenantId],
+    queryFn: () => tenantApi.getTenantKnowledge(tenantId),
+  });
+
+  useEffect(() => {
+    const resource = knowledgeQuery.data?.resource;
+    if (!resource) {
+      return;
+    }
+    setOrgOverrideForm((current) => ({
+      ...current,
+      org_max_file_bytes: resource.limits.max_file_bytes,
+      org_max_document_count: resource.limits.max_document_count,
+      org_max_total_bytes: resource.limits.max_total_bytes,
+      org_max_extracted_text_bytes: resource.limits.max_extracted_text_bytes,
+      org_max_chunks_per_document: resource.limits.max_chunks_per_document,
+      org_max_retrieved_chunks: resource.limits.max_retrieved_chunks,
+      max_retrieved_chunks_total: resource.limits.max_retrieved_chunks_total,
+    }));
+  }, [knowledgeQuery.data]);
+
+  const updateCollectionMutation = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => tenantApi.updateTenantKnowledgeCollection(tenantId, payload),
+    onSuccess: async () => {
+      await invalidateTenant();
+      await knowledgeQuery.refetch();
+    },
+  });
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => tenantApi.uploadTenantKnowledgeDocument(tenantId, file),
+    onSuccess: async () => {
+      await invalidateTenant();
+      await knowledgeQuery.refetch();
+    },
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (documentId: string) => tenantApi.deleteTenantKnowledgeDocument(tenantId, documentId),
+    onSuccess: async () => {
+      await invalidateTenant();
+      await knowledgeQuery.refetch();
+    },
+  });
+  const reprocessMutation = useMutation({
+    mutationFn: (documentId: string) => tenantApi.reprocessTenantKnowledgeDocument(tenantId, documentId),
+    onSuccess: async () => {
+      await invalidateTenant();
+      await knowledgeQuery.refetch();
+    },
+  });
+  const overrideMutation = useMutation({
+    mutationFn: () => tenantApi.updateTenantRagQuotaOverride(tenantId, orgOverrideForm),
+    onSuccess: async () => {
+      await knowledgeQuery.refetch();
+    },
+  });
+
+  const knowledge = knowledgeQuery.data?.resource;
+
+  return (
+    <div className="stack">
+      <div className="panel stack">
+        <CardHelpTooltip text="Manage organization-wide knowledge documents, see effective quotas, and enable or disable runtime retrieval for this tenant." />
+        <div className="split-header">
+          <div>
+            <h3 className="panel-title">Organization Knowledge</h3>
+            <div className="muted">Shared documents that can supply tenant-wide RAG context during response generation.</div>
+          </div>
+          <button
+            className="ghost-button"
+            type="button"
+            disabled={!knowledge}
+            onClick={() =>
+              knowledge &&
+              updateCollectionMutation.mutate({
+                retrieval_enabled: !knowledge.collection.retrieval_enabled,
+                is_active: true,
+              })
+            }
+          >
+            {knowledge?.collection.retrieval_enabled ? "Disable retrieval" : "Enable retrieval"}
+          </button>
+        </div>
+        {knowledge ? (
+          <>
+            <div className="grid grid--two">
+              <div className="card stack">
+                <div className="muted">Effective Limits</div>
+                <div>Source: {knowledge.limits.policy_source}</div>
+                <div>Max file: {formatBytes(knowledge.limits.max_file_bytes)}</div>
+                <div>Max docs: {knowledge.limits.max_document_count}</div>
+                <div>Max storage: {formatBytes(knowledge.limits.max_total_bytes)}</div>
+                <div>Max extracted text: {formatBytes(knowledge.limits.max_extracted_text_bytes)}</div>
+                <div>Max chunks/doc: {knowledge.limits.max_chunks_per_document}</div>
+                <div>Max retrieved/answer: {knowledge.limits.max_retrieved_chunks}</div>
+                <div>Combined cap: {knowledge.limits.max_retrieved_chunks_total}</div>
+              </div>
+              <div className="card stack">
+                <div className="muted">Usage</div>
+                <div>{knowledge.usage.document_count} / {knowledge.limits.max_document_count} docs</div>
+                <div>{formatBytes(knowledge.usage.total_bytes)} / {formatBytes(knowledge.limits.max_total_bytes)}</div>
+                <div>Ready: {knowledge.usage.ready_documents}</div>
+                <div>Processing: {knowledge.usage.processing_documents}</div>
+                <div>Failed: {knowledge.usage.failed_documents}</div>
+                <div>Knowledge configured: {onboarding?.knowledge_configured ? "Yes" : "No"}</div>
+                <div>Knowledge ready: {onboarding?.knowledge_ready ? "Yes" : "No"}</div>
+              </div>
+            </div>
+
+            <label className="field-label" htmlFor="knowledge_upload">Upload documents</label>
+            <input
+              className="field"
+              id="knowledge_upload"
+              type="file"
+              accept=".pdf,.docx,.txt,.md,.csv"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  uploadMutation.mutate(file);
+                }
+                event.currentTarget.value = "";
+              }}
+            />
+
+            <div className="stack">
+              {knowledge.documents.map((document) => (
+                <div className="key-value" key={document.id}>
+                  <div>
+                    <strong>{document.filename}</strong>
+                    <div className="muted">
+                      {document.status} / {formatBytes(document.size_bytes)} / {formatDateTime(document.uploaded_at)}
+                    </div>
+                    {document.status_message ? <div className="muted">{document.status_message}</div> : null}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button className="ghost-button" type="button" onClick={() => reprocessMutation.mutate(document.id)}>
+                      Reprocess
+                    </button>
+                    <button className="ghost-button" type="button" onClick={() => deleteMutation.mutate(document.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {knowledge.documents.length === 0 ? <div className="section-note">No organization documents uploaded yet.</div> : null}
+            </div>
+          </>
+        ) : (
+          <div className="section-note">Loading organization knowledge…</div>
+        )}
+      </div>
+
+      <div className="panel stack">
+        <CardHelpTooltip text="Create a tenant-specific quota override when this organization needs limits that differ from the global or service-tier defaults." />
+        <div>
+          <h3 className="panel-title">Organization Override</h3>
+          <div className="muted">Optional override for this organization’s knowledge limits.</div>
+        </div>
+        <div className="field-row field-row--three">
+          <div>
+            <label className="field-label" htmlFor="org_max_file_bytes">Org Max File (bytes)</label>
+            <input className="field" id="org_max_file_bytes" type="number" value={orgOverrideForm.org_max_file_bytes} onChange={(event) => setOrgOverrideForm((current) => ({ ...current, org_max_file_bytes: Number(event.target.value) }))} />
+          </div>
+          <div>
+            <label className="field-label" htmlFor="org_max_document_count">Org Max Docs</label>
+            <input className="field" id="org_max_document_count" type="number" value={orgOverrideForm.org_max_document_count} onChange={(event) => setOrgOverrideForm((current) => ({ ...current, org_max_document_count: Number(event.target.value) }))} />
+          </div>
+          <div>
+            <label className="field-label" htmlFor="org_max_total_bytes">Org Max Storage (bytes)</label>
+            <input className="field" id="org_max_total_bytes" type="number" value={orgOverrideForm.org_max_total_bytes} onChange={(event) => setOrgOverrideForm((current) => ({ ...current, org_max_total_bytes: Number(event.target.value) }))} />
+          </div>
+        </div>
+        <button className="primary-button" type="button" onClick={() => overrideMutation.mutate()}>
+          {overrideMutation.isPending ? "Saving override..." : "Save org override"}
+        </button>
       </div>
     </div>
   );

@@ -7,7 +7,7 @@ import { StatusBadge } from "../../components/status/StatusBadge";
 import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { tenantApi } from "../../features/tenants/api";
 import { formatDateTime } from "../../lib/format";
-import type { PlatformManagedLlmTestResult } from "../../lib/types";
+import type { PlatformManagedLlmTestResult, RagQuotaPolicy } from "../../lib/types";
 
 const defaultForm = {
   label: "",
@@ -39,6 +39,23 @@ const defaultPlatformLlmForm = {
   is_active: true,
 };
 
+const baselineRagQuotaForm = {
+  org_max_file_bytes: 25 * 1024 * 1024,
+  user_max_file_bytes: 10 * 1024 * 1024,
+  org_max_document_count: 100,
+  user_max_document_count: 20,
+  org_max_total_bytes: 250 * 1024 * 1024,
+  user_max_total_bytes: 50 * 1024 * 1024,
+  org_max_extracted_text_bytes: 1024 * 1024,
+  user_max_extracted_text_bytes: 512 * 1024,
+  org_max_chunks_per_document: 500,
+  user_max_chunks_per_document: 200,
+  org_max_retrieved_chunks: 4,
+  user_max_retrieved_chunks: 2,
+  max_retrieved_chunks_total: 6,
+  is_active: true,
+};
+
 const providerDefaultEndpoints: Record<string, string> = {
   openai: "https://api.openai.com/v1",
   azure_openai: "https://YOUR-RESOURCE-NAME.openai.azure.com/openai/v1",
@@ -60,6 +77,9 @@ export function SettingsPage() {
     notes: "",
     is_active: true,
   });
+  const [defaultRagQuotaDraft, setDefaultRagQuotaDraft] = useState(baselineRagQuotaForm);
+  const [selectedTierQuotaId, setSelectedTierQuotaId] = useState("");
+  const [tierRagQuotaForm, setTierRagQuotaForm] = useState(baselineRagQuotaForm);
   const previousProviderRef = useRef(platformLlmForm.provider_type);
   const previousEndpointRef = useRef(platformLlmForm.endpoint_url);
 
@@ -83,6 +103,14 @@ export function SettingsPage() {
     queryKey: ["platform-managed-llms", "all"],
     queryFn: () => tenantApi.listPlatformManagedLlms(true),
   });
+  const ragQuotaPoliciesQuery = useQuery({
+    queryKey: ["rag-quota-policies"],
+    queryFn: () => tenantApi.listRagQuotaPolicies(),
+  });
+  const serviceTiersQuery = useQuery({
+    queryKey: ["service-tiers", "organization", true],
+    queryFn: () => tenantApi.listServiceTiers({ scope_type: "organization", include_inactive: true }),
+  });
 
   const activePromptUi = useMemo(
     () => promptUiInstancesQuery.data?.items.find((instance) => instance.is_active) ?? null,
@@ -92,6 +120,11 @@ export function SettingsPage() {
     () => platformManagedLlmsQuery.data?.items.filter((instance) => instance.is_active) ?? [],
     [platformManagedLlmsQuery.data],
   );
+  const ragQuotaPolicies = ragQuotaPoliciesQuery.data?.items ?? [];
+  const defaultRagQuotaPolicy = ragQuotaPolicies.find((policy) => policy.scope_target === "global_default") ?? null;
+  const selectedTierRagPolicy = ragQuotaPolicies.find(
+    (policy) => policy.scope_target === "service_tier" && policy.service_tier_definition_id === selectedTierQuotaId,
+  ) ?? null;
   const currentPlatformLlmFingerprint = useMemo(
     () =>
       JSON.stringify({
@@ -124,6 +157,23 @@ export function SettingsPage() {
     previousProviderRef.current = currentProvider;
     previousEndpointRef.current = currentEndpoint;
   }, [platformLlmForm.endpoint_url, platformLlmForm.provider_type]);
+
+  useEffect(() => {
+    if (!defaultRagQuotaPolicy) {
+      return;
+    }
+    setDefaultRagQuotaDraft({
+      ...baselineRagQuotaForm,
+      ...pickRagQuotaFields(defaultRagQuotaPolicy),
+    });
+  }, [defaultRagQuotaPolicy]);
+
+  useEffect(() => {
+    if (!selectedTierQuotaId) {
+      return;
+    }
+    setTierRagQuotaForm(selectedTierRagPolicy ? pickRagQuotaFields(selectedTierRagPolicy) : baselineRagQuotaForm);
+  }, [selectedTierQuotaId, selectedTierRagPolicy]);
 
   const createMutation = useMutation({
     mutationFn: () => tenantApi.createDatabaseInstance(form),
@@ -225,8 +275,21 @@ export function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ["platform-managed-llms"] });
     },
   });
+  const updateDefaultRagQuotaMutation = useMutation({
+    mutationFn: () => tenantApi.updateDefaultRagQuotaPolicy(defaultRagQuotaDraft),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rag-quota-policies"] });
+    },
+  });
+  const updateTierRagQuotaMutation = useMutation({
+    mutationFn: () => tenantApi.updateServiceTierRagQuotaPolicy(selectedTierQuotaId, tierRagQuotaForm),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["rag-quota-policies"] });
+    },
+  });
 
   const platformManagedLlms = platformManagedLlmsQuery.data?.items ?? [];
+  const serviceTiers = serviceTiersQuery.data?.items ?? [];
 
   useEffect(() => {
     if (platformManagedLlms.length === 0) {
@@ -1120,6 +1183,90 @@ export function SettingsPage() {
           </table>
         </div>
       </div>
+
+      <div className="panel stack">
+        <CardHelpTooltip text="Manage the default and service-tier quota policies that govern organization knowledge and personal context file limits." />
+        <div className="split-header">
+          <div>
+            <h3 className="panel-title">RAG Quota Policies</h3>
+            <div className="muted">These policies drive the effective limits shown in Herman Admin and HermanPrompt.</div>
+          </div>
+        </div>
+
+        <div className="grid grid--two">
+          <div className="card stack">
+            <div className="muted">Default Policy</div>
+            <div className="field-row field-row--two">
+              <div>
+                <label className="field-label" htmlFor="default_org_max_file_bytes">Org max file (bytes)</label>
+                <input className="field" id="default_org_max_file_bytes" type="number" value={defaultRagQuotaDraft.org_max_file_bytes} onChange={(event) => setDefaultRagQuotaDraft((current) => ({ ...current, org_max_file_bytes: Number(event.target.value) }))} />
+              </div>
+              <div>
+                <label className="field-label" htmlFor="default_user_max_file_bytes">User max file (bytes)</label>
+                <input className="field" id="default_user_max_file_bytes" type="number" value={defaultRagQuotaDraft.user_max_file_bytes} onChange={(event) => setDefaultRagQuotaDraft((current) => ({ ...current, user_max_file_bytes: Number(event.target.value) }))} />
+              </div>
+            </div>
+            <div className="field-row field-row--two">
+              <div>
+                <label className="field-label" htmlFor="default_org_docs">Org max docs</label>
+                <input className="field" id="default_org_docs" type="number" value={defaultRagQuotaDraft.org_max_document_count} onChange={(event) => setDefaultRagQuotaDraft((current) => ({ ...current, org_max_document_count: Number(event.target.value) }))} />
+              </div>
+              <div>
+                <label className="field-label" htmlFor="default_user_docs">User max docs</label>
+                <input className="field" id="default_user_docs" type="number" value={defaultRagQuotaDraft.user_max_document_count} onChange={(event) => setDefaultRagQuotaDraft((current) => ({ ...current, user_max_document_count: Number(event.target.value) }))} />
+              </div>
+            </div>
+            <button className="primary-button" type="button" onClick={() => updateDefaultRagQuotaMutation.mutate()}>
+              {updateDefaultRagQuotaMutation.isPending ? "Saving..." : "Save default policy"}
+            </button>
+          </div>
+
+          <div className="card stack">
+            <div className="muted">Service Tier Policy</div>
+            <div>
+              <label className="field-label" htmlFor="tier_rag_policy_select">Organization tier</label>
+              <select className="field" id="tier_rag_policy_select" value={selectedTierQuotaId} onChange={(event) => setSelectedTierQuotaId(event.target.value)}>
+                <option value="">Choose a tier</option>
+                {serviceTiers.map((tier) => (
+                  <option key={tier.id} value={tier.id}>{tier.tier_name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field-row field-row--two">
+              <div>
+                <label className="field-label" htmlFor="tier_org_max_file_bytes">Org max file (bytes)</label>
+                <input className="field" id="tier_org_max_file_bytes" type="number" value={tierRagQuotaForm.org_max_file_bytes} onChange={(event) => setTierRagQuotaForm((current) => ({ ...current, org_max_file_bytes: Number(event.target.value) }))} />
+              </div>
+              <div>
+                <label className="field-label" htmlFor="tier_user_max_file_bytes">User max file (bytes)</label>
+                <input className="field" id="tier_user_max_file_bytes" type="number" value={tierRagQuotaForm.user_max_file_bytes} onChange={(event) => setTierRagQuotaForm((current) => ({ ...current, user_max_file_bytes: Number(event.target.value) }))} />
+              </div>
+            </div>
+            <button className="primary-button" type="button" disabled={!selectedTierQuotaId} onClick={() => updateTierRagQuotaMutation.mutate()}>
+              {updateTierRagQuotaMutation.isPending ? "Saving..." : "Save service tier policy"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
+}
+
+function pickRagQuotaFields(policy: RagQuotaPolicy) {
+  return {
+    org_max_file_bytes: policy.org_max_file_bytes,
+    user_max_file_bytes: policy.user_max_file_bytes,
+    org_max_document_count: policy.org_max_document_count,
+    user_max_document_count: policy.user_max_document_count,
+    org_max_total_bytes: policy.org_max_total_bytes,
+    user_max_total_bytes: policy.user_max_total_bytes,
+    org_max_extracted_text_bytes: policy.org_max_extracted_text_bytes,
+    user_max_extracted_text_bytes: policy.user_max_extracted_text_bytes,
+    org_max_chunks_per_document: policy.org_max_chunks_per_document,
+    user_max_chunks_per_document: policy.user_max_chunks_per_document,
+    org_max_retrieved_chunks: policy.org_max_retrieved_chunks,
+    user_max_retrieved_chunks: policy.user_max_retrieved_chunks,
+    max_retrieved_chunks_total: policy.max_retrieved_chunks_total,
+    is_active: policy.is_active,
+  };
 }

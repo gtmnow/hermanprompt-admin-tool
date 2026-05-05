@@ -24,6 +24,7 @@ const detailTabs = [
   { label: "Portal", suffix: "/portal" },
   { label: "LLM Config", suffix: "/llm-config" },
   { label: "Runtime", suffix: "/runtime" },
+  { label: "Knowledge", suffix: "/knowledge" },
   { label: "Onboarding", suffix: "/onboarding" },
 ];
 

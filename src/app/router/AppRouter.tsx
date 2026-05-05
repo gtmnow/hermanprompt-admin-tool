@@ -13,6 +13,7 @@ import { OrganizationDetailPage } from "../../pages/organizations/OrganizationDe
 import {
   OrganizationAdminsTab,
   OrganizationGroupsTab,
+  OrganizationKnowledgeTab,
   OrganizationLlmConfigTab,
   OrganizationOnboardingTab,
   OrganizationPortalTab,
@@ -89,6 +90,7 @@ export function AppRouter() {
             <Route path="portal" element={<OrganizationPortalTab />} />
             <Route path="llm-config" element={<OrganizationLlmConfigTab />} />
             <Route path="runtime" element={<OrganizationRuntimeTab />} />
+            <Route path="knowledge" element={<OrganizationKnowledgeTab />} />
             <Route path="onboarding" element={<OrganizationOnboardingTab />} />
           </Route>
           <Route path="/users" element={<UsersPage />} />

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from app.core.config import get_settings
 from app.db import get_db
 from app.llm_validation import test_platform_llm_connection, validate_platform_llm_runtime
-from app.models import DatabaseInstanceConfig, PlatformManagedLlmConfig, PromptUiInstanceConfig, ResellerPartner, ResellerTenantDefaults, ServiceTierDefinition, Tenant, TenantLLMConfig
+from app.models import DatabaseInstanceConfig, PlatformManagedLlmConfig, PromptUiInstanceConfig, RagQuotaPolicy, ResellerPartner, ResellerTenantDefaults, ServiceTierDefinition, Tenant, TenantLLMConfig
 from app.schemas import (
     DatabaseInstanceConfigCreate,
     DatabaseInstanceConfigSummary,
@@ -23,6 +23,8 @@ from app.schemas import (
     PromptUiInstanceConfigCreate,
     PromptUiInstanceConfigSummary,
     PromptUiInstanceConfigUpdate,
+    RagQuotaPolicySummary,
+    RagQuotaPolicyUpdate,
     ResourceEnvelope,
     RuntimeDatabaseTargetSummary,
     SecretVaultStatusSummary,
@@ -64,6 +66,10 @@ def to_platform_llm_summary(record: PlatformManagedLlmConfig) -> PlatformManaged
 
 def to_service_tier_summary(record: ServiceTierDefinition) -> ServiceTierDefinitionSummary:
     return ServiceTierDefinitionSummary.model_validate(record, from_attributes=True)
+
+
+def to_rag_quota_summary(record: RagQuotaPolicy) -> RagQuotaPolicySummary:
+    return RagQuotaPolicySummary.model_validate(record, from_attributes=True)
 
 
 @router.get("/service-tiers", response_model=ListEnvelope[ServiceTierDefinitionSummary])
@@ -788,3 +794,88 @@ def update_prompt_ui_instance(
         resource=PromptUiInstanceConfigSummary.model_validate(record, from_attributes=True),
         updated_at=record.updated_at,
     )
+
+
+@router.get("/rag-quotas", response_model=ListEnvelope[RagQuotaPolicySummary])
+def list_rag_quota_policies(
+    principal: Principal = Depends(require_permission("runtime.read")),
+    db: Session = Depends(get_db),
+) -> ListEnvelope[RagQuotaPolicySummary]:
+    _ = principal
+    items = [to_rag_quota_summary(item) for item in db.scalars(select(RagQuotaPolicy).order_by(RagQuotaPolicy.scope_target.asc(), RagQuotaPolicy.policy_key.asc()))]
+    return ListEnvelope[RagQuotaPolicySummary](
+        items=items,
+        page=1,
+        page_size=len(items) or 1,
+        total_count=len(items),
+        filters={},
+    )
+
+
+@router.put("/rag-quotas/default", response_model=ResourceEnvelope[RagQuotaPolicySummary])
+def update_default_rag_quota_policy(
+    payload: RagQuotaPolicyUpdate,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[RagQuotaPolicySummary]:
+    policy = db.scalar(select(RagQuotaPolicy).where(RagQuotaPolicy.scope_target == "global_default"))
+    before = serialize_model(policy) if policy else None
+    if policy is None:
+        policy = RagQuotaPolicy(policy_key="global_default", scope_target="global_default")
+    for key, value in payload.model_dump().items():
+        setattr(policy, key, value)
+    db.add(policy)
+    write_audit_log(
+        db,
+        principal,
+        action_type="settings.rag_quota.default.update",
+        target_type="rag_quota_policy",
+        target_id=policy.policy_key,
+        before=before,
+        after=serialize_model(policy),
+        request_id=request_id,
+    )
+    db.commit()
+    db.refresh(policy)
+    return ResourceEnvelope[RagQuotaPolicySummary](resource=to_rag_quota_summary(policy), updated_at=policy.updated_at)
+
+
+@router.put("/rag-quotas/service-tier/{service_tier_id}", response_model=ResourceEnvelope[RagQuotaPolicySummary])
+def update_service_tier_rag_quota_policy(
+    service_tier_id: str,
+    payload: RagQuotaPolicyUpdate,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[RagQuotaPolicySummary]:
+    policy = db.scalar(
+        select(RagQuotaPolicy).where(
+            RagQuotaPolicy.scope_target == "service_tier",
+            RagQuotaPolicy.service_tier_definition_id == service_tier_id,
+            RagQuotaPolicy.user_type.is_(None),
+        )
+    )
+    before = serialize_model(policy) if policy else None
+    if policy is None:
+        policy = RagQuotaPolicy(
+            policy_key=f"service_tier:{service_tier_id}",
+            scope_target="service_tier",
+            service_tier_definition_id=service_tier_id,
+        )
+    for key, value in payload.model_dump().items():
+        setattr(policy, key, value)
+    db.add(policy)
+    write_audit_log(
+        db,
+        principal,
+        action_type="settings.rag_quota.service_tier.update",
+        target_type="rag_quota_policy",
+        target_id=service_tier_id,
+        before=before,
+        after=serialize_model(policy),
+        request_id=request_id,
+    )
+    db.commit()
+    db.refresh(policy)
+    return ResourceEnvelope[RagQuotaPolicySummary](resource=to_rag_quota_summary(policy), updated_at=policy.updated_at)

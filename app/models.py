@@ -323,6 +323,8 @@ class TenantOnboardingStatus(Base):
     groups_created: Mapped[bool] = mapped_column(Boolean, default=False)
     users_uploaded: Mapped[bool] = mapped_column(Boolean, default=False)
     admin_assigned: Mapped[bool] = mapped_column(Boolean, default=False)
+    knowledge_configured: Mapped[bool] = mapped_column(Boolean, default=False)
+    knowledge_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     first_login_detected: Mapped[bool] = mapped_column(Boolean, default=False)
     first_transform_detected: Mapped[bool] = mapped_column(Boolean, default=False)
     first_score_detected: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -330,6 +332,31 @@ class TenantOnboardingStatus(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="onboarding_status")
+
+
+class RagQuotaPolicy(TimestampMixin, Base):
+    __tablename__ = "rag_quota_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    policy_key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    scope_target: Mapped[str] = mapped_column(String(32), index=True)
+    service_tier_definition_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    user_type: Mapped[str | None] = mapped_column(String(100), index=True)
+    org_max_file_bytes: Mapped[int] = mapped_column(Integer)
+    user_max_file_bytes: Mapped[int] = mapped_column(Integer)
+    org_max_document_count: Mapped[int] = mapped_column(Integer)
+    user_max_document_count: Mapped[int] = mapped_column(Integer)
+    org_max_total_bytes: Mapped[int] = mapped_column(Integer)
+    user_max_total_bytes: Mapped[int] = mapped_column(Integer)
+    org_max_extracted_text_bytes: Mapped[int] = mapped_column(Integer)
+    user_max_extracted_text_bytes: Mapped[int] = mapped_column(Integer)
+    org_max_chunks_per_document: Mapped[int] = mapped_column(Integer)
+    user_max_chunks_per_document: Mapped[int] = mapped_column(Integer)
+    org_max_retrieved_chunks: Mapped[int] = mapped_column(Integer)
+    user_max_retrieved_chunks: Mapped[int] = mapped_column(Integer)
+    max_retrieved_chunks_total: Mapped[int] = mapped_column(Integer)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class ReportExportJob(Base):

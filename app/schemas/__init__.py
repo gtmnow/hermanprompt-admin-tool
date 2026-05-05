@@ -10,6 +10,16 @@ from app.schemas.audit import AuditLogEntry
 from app.schemas.common import ListEnvelope, ResourceEnvelope
 from app.schemas.groups import Group, GroupCreate, GroupProfile, GroupUpdate
 from app.schemas.onboarding import TenantOnboardingStatus
+from app.schemas.rag import (
+    EffectiveRagLimits,
+    RagCollectionSummary,
+    RagDocumentSummary,
+    RagQuotaPolicySummary,
+    RagQuotaPolicyUpdate,
+    RagUsageSummary,
+    TenantKnowledgeCollectionUpdate,
+    TenantKnowledgeSummary,
+)
 from app.schemas.reports import (
     ReportExportJobSummary,
     ReportExportRequest,
@@ -96,6 +106,7 @@ __all__ = [
     "PromptUiInstanceConfigUpdate",
     "RuntimeDatabaseTargetSummary",
     "LaunchExchangeRequest",
+    "EffectiveRagLimits",
     "SecretVaultStatusSummary",
     "Group",
     "GroupCreate",
@@ -119,6 +130,11 @@ __all__ = [
     "ServiceTierDefinitionCreate",
     "ServiceTierDefinitionSummary",
     "ServiceTierDefinitionUpdate",
+    "RagCollectionSummary",
+    "RagDocumentSummary",
+    "RagQuotaPolicySummary",
+    "RagQuotaPolicyUpdate",
+    "RagUsageSummary",
     "SystemOverview",
     "Tenant",
     "TenantCreate",
@@ -131,6 +147,8 @@ __all__ = [
     "TenantProfile",
     "TenantRuntimeSettings",
     "TenantRuntimeSettingsUpdate",
+    "TenantKnowledgeCollectionUpdate",
+    "TenantKnowledgeSummary",
     "TenantSummary",
     "TenantUpdate",
     "TenantValidationResult",

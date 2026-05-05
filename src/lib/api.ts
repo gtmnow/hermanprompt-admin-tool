@@ -7,8 +7,9 @@ const DEV_ADMIN_HEADER =
     : "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const headers: HeadersInit = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(DEV_ADMIN_HEADER ? { "X-Admin-User": DEV_ADMIN_HEADER } : {}),
     ...(init?.headers ?? {}),
   };
@@ -65,6 +66,12 @@ export const api = {
   deleteResource<T>(path: string) {
     return request<ResourceEnvelope<T>>(path, {
       method: "DELETE",
+    });
+  },
+  postFormResource<T>(path: string, body: FormData) {
+    return request<ResourceEnvelope<T>>(path, {
+      method: "POST",
+      body,
     });
   },
 };

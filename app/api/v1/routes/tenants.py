@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -12,10 +12,12 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.core.config import get_settings
 from app.llm_validation import validate_platform_llm_runtime
-from app.models import PlatformManagedLlmConfig, Tenant, TenantLLMConfig, TenantOnboardingStatus, TenantRuntimeSettings
+from app.models import PlatformManagedLlmConfig, RagQuotaPolicy, Tenant, TenantLLMConfig, TenantOnboardingStatus, TenantRuntimeSettings
 from app.schemas import (
     ListEnvelope,
     ResourceEnvelope,
+    RagQuotaPolicySummary,
+    RagQuotaPolicyUpdate,
     Tenant as TenantSchema,
     TenantCreate,
     TenantLifecycleActionRequest,
@@ -26,12 +28,15 @@ from app.schemas import (
     TenantProfile as TenantProfileSchema,
     TenantRuntimeSettings as TenantRuntimeSettingsSchema,
     TenantRuntimeSettingsUpdate,
+    TenantKnowledgeCollectionUpdate,
+    TenantKnowledgeSummary,
     ServiceTierDefinitionSummary,
     TenantSummary,
     TenantUpdate,
     TenantValidationResult,
 )
 from app.security import Principal, require_permission
+from app.services.prompt_transformer import PromptTransformerClient
 from app.secret_vault import resolve_secret_reference, store_managed_secret
 from app.services import (
     apply_reseller_defaults_to_tenant,
@@ -60,6 +65,7 @@ from app.services import (
 
 router = APIRouter()
 settings = get_settings()
+transformer_client = PromptTransformerClient()
 
 
 class ActivationOverrideRequest(BaseModel):
@@ -219,6 +225,22 @@ def snapshot_summary(db: Session, snapshot_tenant_id: str) -> TenantSummary:
         ),
         llm_config=None,
         runtime_settings=None,
+    )
+
+
+def _map_tenant_knowledge(payload: dict) -> TenantKnowledgeSummary:
+    return TenantKnowledgeSummary.model_validate(
+        {
+            "collection": {
+                "id": payload["collection"]["id"],
+                "retrieval_enabled": payload["collection"]["retrieval_enabled"],
+                "is_active": payload["collection"]["is_active"],
+                "max_results": payload["collection"].get("max_results"),
+            },
+            "limits": payload["limits"],
+            "usage": payload["usage"],
+            "documents": payload["documents"],
+        }
     )
 
 
@@ -849,4 +871,129 @@ def update_runtime_settings(
     return ResourceEnvelope[TenantRuntimeSettingsSchema](
         resource=to_runtime_schema(runtime_settings),
         updated_at=runtime_settings.updated_at,
+    )
+
+
+@router.get("/{tenant_id}/knowledge", response_model=ResourceEnvelope[TenantKnowledgeSummary])
+def get_tenant_knowledge(
+    tenant_id: str,
+    principal: Principal = Depends(require_permission("runtime.read")),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[TenantKnowledgeSummary]:
+    tenant = get_tenant_or_404(db, tenant_id)
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    payload = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(payload))
+
+
+@router.post("/{tenant_id}/knowledge/documents", response_model=ResourceEnvelope[TenantKnowledgeSummary], status_code=status.HTTP_201_CREATED)
+def upload_tenant_knowledge_document(
+    tenant_id: str,
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require_permission("runtime.write")),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[TenantKnowledgeSummary]:
+    tenant = get_tenant_or_404(db, tenant_id)
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    transformer_client.request(
+        "POST",
+        "/api/rag/tenant-documents",
+        data={"tenant_id": tenant.id, "uploaded_by_admin_user_id": principal.admin_id},
+        files={"file": (file.filename or "document", file.file.read(), file.content_type or "application/octet-stream")},
+    )
+    refresh_onboarding_state(db, tenant.id)
+    db.commit()
+    payload = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(payload))
+
+
+@router.delete("/{tenant_id}/knowledge/documents/{document_id}", response_model=ResourceEnvelope[TenantKnowledgeSummary])
+def delete_tenant_knowledge_document(
+    tenant_id: str,
+    document_id: str,
+    principal: Principal = Depends(require_permission("runtime.write")),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[TenantKnowledgeSummary]:
+    tenant = get_tenant_or_404(db, tenant_id)
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    transformer_client.request("DELETE", f"/api/rag/tenant-documents/{document_id}", params={"tenant_id": tenant.id})
+    refresh_onboarding_state(db, tenant.id)
+    db.commit()
+    payload = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(payload))
+
+
+@router.post("/{tenant_id}/knowledge/documents/{document_id}/reprocess", response_model=ResourceEnvelope[TenantKnowledgeSummary])
+def reprocess_tenant_knowledge_document(
+    tenant_id: str,
+    document_id: str,
+    principal: Principal = Depends(require_permission("runtime.write")),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[TenantKnowledgeSummary]:
+    tenant = get_tenant_or_404(db, tenant_id)
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    transformer_client.request("POST", f"/api/rag/documents/{document_id}/reprocess")
+    refresh_onboarding_state(db, tenant.id)
+    db.commit()
+    payload = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(payload))
+
+
+@router.patch("/{tenant_id}/knowledge/collection", response_model=ResourceEnvelope[TenantKnowledgeSummary])
+def update_tenant_knowledge_collection(
+    tenant_id: str,
+    payload: TenantKnowledgeCollectionUpdate,
+    principal: Principal = Depends(require_permission("runtime.write")),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[TenantKnowledgeSummary]:
+    tenant = get_tenant_or_404(db, tenant_id)
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    current = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    transformer_client.request("PATCH", f"/api/rag/collections/{current['collection']['id']}", json=payload.model_dump(exclude_none=True))
+    refreshed = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(refreshed))
+
+
+@router.put("/{tenant_id}/rag-quotas/override", response_model=ResourceEnvelope[RagQuotaPolicySummary])
+def update_tenant_rag_quota_override(
+    tenant_id: str,
+    payload: RagQuotaPolicyUpdate,
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
+    principal: Principal = Depends(require_permission("runtime.write")),
+    db: Session = Depends(get_db),
+) -> ResourceEnvelope[RagQuotaPolicySummary]:
+    tenant = get_tenant_or_404(db, tenant_id)
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    policy = db.scalar(
+        select(RagQuotaPolicy).where(
+            RagQuotaPolicy.scope_target == "tenant_override",
+            RagQuotaPolicy.tenant_id == tenant.id,
+            RagQuotaPolicy.user_type.is_(None),
+        )
+    )
+    before = serialize_model(policy) if policy else None
+    if policy is None:
+        policy = RagQuotaPolicy(
+            policy_key=f"tenant_override:{tenant.id}",
+            scope_target="tenant_override",
+            tenant_id=tenant.id,
+        )
+    for key, value in payload.model_dump().items():
+        setattr(policy, key, value)
+    db.add(policy)
+    write_audit_log(
+        db,
+        principal,
+        action_type="tenant.rag_quota_override.update",
+        target_type="rag_quota_policy",
+        target_id=tenant.id,
+        before=before,
+        after=serialize_model(policy),
+        request_id=request_id,
+    )
+    db.commit()
+    db.refresh(policy)
+    return ResourceEnvelope[RagQuotaPolicySummary](
+        resource=RagQuotaPolicySummary.model_validate(policy, from_attributes=True),
+        updated_at=policy.updated_at,
     )

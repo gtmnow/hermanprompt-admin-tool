@@ -40,6 +40,7 @@ const steps = [
   "Organization Info",
   "LLM Configuration",
   "Runtime Settings",
+  "Knowledge Base",
   "Admin Users Upload",
   "Admin Setup",
   "Groups Setup",
@@ -237,6 +238,16 @@ function tierUserLimit(limitSource?: { max_users: number | null; has_unlimited_u
   return limitSource.max_users;
 }
 
+function formatBytes(value: number) {
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+  return `${value} B`;
+}
+
 export function ActivationWizardPage() {
   const { tenantId } = useParams();
   const location = useLocation();
@@ -256,6 +267,7 @@ export function ActivationWizardPage() {
   const [invitePromptUsers, setInvitePromptUsers] = useState<UserMembership[]>([]);
   const [userLimitDialog, setUserLimitDialog] = useState<UserLimitDialogState | null>(null);
   const [activationSuccessMessage, setActivationSuccessMessage] = useState<string | null>(null);
+  const [knowledgeUploadError, setKnowledgeUploadError] = useState<string | null>(null);
   const lastAppliedResellerDefaultsId = useRef<string | null>(null);
 
   function advanceToNextStep() {
@@ -310,6 +322,11 @@ export function ActivationWizardPage() {
   const platformManagedLlmsQuery = useQuery({
     queryKey: ["platform-managed-llms"],
     queryFn: () => tenantApi.listPlatformManagedLlms(),
+  });
+  const knowledgeQuery = useQuery({
+    queryKey: ["activation-knowledge", tenantId],
+    queryFn: () => tenantApi.getTenantKnowledge(tenantId ?? ""),
+    enabled: Boolean(tenantId),
   });
   const resellersQuery = useQuery({
     queryKey: ["resellers"],
@@ -500,6 +517,24 @@ export function ActivationWizardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["activation-tenant", tenantId] });
       advanceToNextStep();
+    },
+  });
+  const uploadKnowledgeMutation = useMutation({
+    mutationFn: (file: File) => tenantApi.uploadTenantKnowledgeDocument(tenantId ?? "", file),
+    onSuccess: async () => {
+      setKnowledgeUploadError(null);
+      await queryClient.invalidateQueries({ queryKey: ["activation-knowledge", tenantId] });
+      await queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
+    },
+    onError: (error) => {
+      setKnowledgeUploadError(mutationMessage(error));
+    },
+  });
+  const deleteKnowledgeMutation = useMutation({
+    mutationFn: (documentId: string) => tenantApi.deleteTenantKnowledgeDocument(tenantId ?? "", documentId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["activation-knowledge", tenantId] });
+      await queryClient.invalidateQueries({ queryKey: ["activation-onboarding-detail", tenantId] });
     },
   });
 
@@ -716,12 +751,14 @@ export function ActivationWizardPage() {
         : activeStep === 2
           ? saveRuntimeMutation.error
         : activeStep === 3
-            ? createUserMutation.error ?? importUsersMutation.error
-            : activeStep === 4
-              ? createAdminMutation.error
+          ? uploadKnowledgeMutation.error ?? deleteKnowledgeMutation.error
+          : activeStep === 4
+              ? createUserMutation.error ?? importUsersMutation.error
               : activeStep === 5
-                ? createGroupMutation.error
-                : activateTenantMutation.error
+                ? createAdminMutation.error
+                : activeStep === 6
+                  ? createGroupMutation.error
+                  : activateTenantMutation.error
   );
   const nextStepDisabled = activeStep === steps.length - 1 || (activeStep === 0 && !tenantId);
 
@@ -820,7 +857,7 @@ export function ActivationWizardPage() {
           </div>
           <h1 className="page-title">Activation Wizard</h1>
           <p className="page-subtitle">
-            Build the organization in the same seven-step structure shown in the approved wireframes.
+            Build the organization in the same activation sequence used across the approved rollout plan, including the optional knowledge-base step.
           </p>
         </div>
         {onboarding ? <StatusBadge value={onboarding.onboarding_status} /> : null}
@@ -1456,7 +1493,97 @@ export function ActivationWizardPage() {
               </div>
             ) : null}
 
-            {activeStep === 5 ? (
+            {activeStep === 3 ? (
+              <div className="stack">
+                <div className="section-note">
+                  Upload shared organization documents now, or skip this step and manage them later from the organization Knowledge tab.
+                </div>
+
+                <div className="grid grid--two">
+                  <div className="section-note">
+                    <strong>Limits</strong>
+                    <div style={{ marginTop: 8 }}>
+                      Max file: {formatBytes(knowledgeQuery.data?.resource.limits.max_file_bytes ?? 0)}
+                    </div>
+                    <div>Max docs: {knowledgeQuery.data?.resource.limits.max_document_count ?? 0}</div>
+                    <div>Max storage: {formatBytes(knowledgeQuery.data?.resource.limits.max_total_bytes ?? 0)}</div>
+                    <div>Source: {knowledgeQuery.data?.resource.limits.policy_source ?? "Default"}</div>
+                  </div>
+                  <div className="section-note">
+                    <strong>Usage</strong>
+                    <div style={{ marginTop: 8 }}>{knowledgeQuery.data?.resource.usage.document_count ?? 0} documents</div>
+                    <div>{formatBytes(knowledgeQuery.data?.resource.usage.total_bytes ?? 0)} stored</div>
+                    <div>{knowledgeQuery.data?.resource.usage.ready_documents ?? 0} ready</div>
+                    <div>{knowledgeQuery.data?.resource.usage.failed_documents ?? 0} failed</div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="field-label" htmlFor="activation_knowledge_upload">Upload organization knowledge</label>
+                  <input
+                    className="field"
+                    id="activation_knowledge_upload"
+                    type="file"
+                    accept=".pdf,.docx,.txt,.md,.csv"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        uploadKnowledgeMutation.mutate(file);
+                      }
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <div className="field-tip">Supported: PDF, DOCX, TXT, MD, CSV.</div>
+                </div>
+
+                {knowledgeUploadError ? <div className="section-note section-note--danger">{knowledgeUploadError}</div> : null}
+
+                <div className="table-wrap">
+                  {(knowledgeQuery.data?.resource.documents ?? []).length === 0 ? (
+                    <div className="empty-state table-empty-state">No organization knowledge documents uploaded yet.</div>
+                  ) : (
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Document</th>
+                          <th>Status</th>
+                          <th>Size</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(knowledgeQuery.data?.resource.documents ?? []).map((document) => (
+                          <tr key={document.id}>
+                            <td>
+                              <strong>{document.filename}</strong>
+                              {document.status_message ? <div className="muted">{document.status_message}</div> : null}
+                            </td>
+                            <td>{titleCase(document.status)}</td>
+                            <td>{formatBytes(document.size_bytes)}</td>
+                            <td>
+                              <button className="ghost-button" type="button" onClick={() => deleteKnowledgeMutation.mutate(document.id)}>
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  <button className="primary-button" type="button" onClick={() => advanceToNextStep()}>
+                    Save and Continue
+                  </button>
+                  <button className="ghost-button" type="button" onClick={() => advanceToNextStep()}>
+                    Skip for now
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {activeStep === 6 ? (
               <div className="stack">
                 <div className="field-row">
                   <div>
@@ -1547,7 +1674,7 @@ export function ActivationWizardPage() {
               </div>
             ) : null}
 
-            {activeStep === 3 ? (
+            {activeStep === 4 ? (
               <div className="stack">
                 <div className="section-note">
                   This step is for adding the organization&apos;s initial users one at a time. Its primary purpose during onboarding is to create the first admin candidates, but you can add any user type here.
@@ -1727,7 +1854,7 @@ export function ActivationWizardPage() {
               </div>
             ) : null}
 
-            {activeStep === 4 ? (
+            {activeStep === 5 ? (
               <div className="stack">
                 <div className="section-note">
                   Use this step to grant administrator access and fine tune what each admin can do in the admin tool. Typical starting points are read/write, read only, and reporting only access.
@@ -1867,13 +1994,15 @@ export function ActivationWizardPage() {
               </div>
             ) : null}
 
-            {activeStep === 6 ? (
+            {activeStep === 7 ? (
               <div className="stack">
                 <div className="checklist">
                   {[
                     ["Org created", onboarding?.tenant_created],
                     ["LLM configured", onboarding?.llm_configured],
                     ["LLM validated", onboarding?.llm_validated],
+                    ["Knowledge configured (optional)", onboarding?.knowledge_configured],
+                    ["Knowledge ready (optional)", onboarding?.knowledge_ready],
                     ["Users uploaded", onboarding?.users_uploaded],
                     ["Admin assigned", onboarding?.admin_assigned],
                     ["Groups created (optional)", onboarding?.groups_created],

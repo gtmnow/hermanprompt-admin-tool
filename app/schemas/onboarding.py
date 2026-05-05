@@ -16,6 +16,8 @@ class TenantOnboardingStatus(BaseModel):
     groups_created: bool = False
     users_uploaded: bool = False
     admin_assigned: bool = False
+    knowledge_configured: bool = False
+    knowledge_ready: bool = False
     first_login_detected: bool = False
     first_transform_detected: bool = False
     first_score_detected: bool = False
