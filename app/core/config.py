@@ -70,9 +70,18 @@ class Settings(BaseSettings):
     )
     launch_token_use: str = "admin_launch"
     user_hash_key: str = "dev-user-hash-key"
-    prompt_transformer_url: str = "http://127.0.0.1:8001"
-    prompt_transformer_api_key: str | None = None
-    prompt_transformer_client_id: str = "hermanadmin"
+    prompt_transformer_url: str = Field(
+        default="http://127.0.0.1:8001",
+        validation_alias=AliasChoices("HERMAN_ADMIN_PROMPT_TRANSFORMER_URL", "PROMPT_TRANSFORMER_URL"),
+    )
+    prompt_transformer_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("HERMAN_ADMIN_PROMPT_TRANSFORMER_API_KEY", "PROMPT_TRANSFORMER_API_KEY"),
+    )
+    prompt_transformer_client_id: str = Field(
+        default="hermanadmin",
+        validation_alias=AliasChoices("HERMAN_ADMIN_PROMPT_TRANSFORMER_CLIENT_ID", "PROMPT_TRANSFORMER_CLIENT_ID"),
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="HERMAN_ADMIN_",
