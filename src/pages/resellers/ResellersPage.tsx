@@ -1011,7 +1011,14 @@ export function ResellersPage() {
                 className="field"
                 id="default_credential_mode"
                 value={defaultsForm.default_credential_mode}
-                onChange={(event) => setDefaultsForm((current) => ({ ...current, default_credential_mode: event.target.value }))}
+                onChange={(event) =>
+                  setDefaultsForm((current) => ({
+                    ...current,
+                    default_credential_mode: event.target.value,
+                    default_platform_managed_config_id:
+                      event.target.value === "customer_managed" ? "" : current.default_platform_managed_config_id,
+                  }))
+                }
               >
                 <option value="platform_managed">HermanScience predefined setup</option>
                 <option value="customer_managed">Organization provided credentials</option>
@@ -1130,7 +1137,13 @@ export function ResellersPage() {
                 id="default_platform_managed_config_id"
                 value={defaultsForm.default_platform_managed_config_id ?? ""}
                 onChange={(event) =>
-                  setDefaultsForm((current) => ({ ...current, default_platform_managed_config_id: event.target.value }))
+                  setDefaultsForm((current) => ({
+                    ...current,
+                    default_platform_managed_config_id: event.target.value,
+                    default_provider_type: event.target.value ? "" : current.default_provider_type,
+                    default_model_name: event.target.value ? "" : current.default_model_name,
+                    default_endpoint_url: event.target.value ? "" : current.default_endpoint_url,
+                  }))
                 }
               >
                 <option value="">No shared LLM default</option>
@@ -1146,6 +1159,7 @@ export function ResellersPage() {
               <input
                 className="field"
                 id="default_provider_type"
+                disabled={defaultsForm.default_credential_mode === "platform_managed"}
                 value={defaultsForm.default_provider_type ?? ""}
                 onChange={(event) => setDefaultsForm((current) => ({ ...current, default_provider_type: event.target.value }))}
               />
@@ -1155,6 +1169,7 @@ export function ResellersPage() {
               <input
                 className="field"
                 id="default_model_name"
+                disabled={defaultsForm.default_credential_mode === "platform_managed"}
                 value={defaultsForm.default_model_name ?? ""}
                 onChange={(event) => setDefaultsForm((current) => ({ ...current, default_model_name: event.target.value }))}
               />

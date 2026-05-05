@@ -31,9 +31,6 @@ class UserMembershipUpdate(BaseModel):
     last_name: str | None = None
     email: str | None = None
     title: str | None = None
-    utilization_level: str | None = None
-    sessions_count: int | None = None
-    avg_improvement_pct: int | None = None
 
 
 class UserLifecycleActionRequest(BaseModel):

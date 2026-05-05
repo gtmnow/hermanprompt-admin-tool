@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import ResellerPartner
+from app.models import PlatformManagedLlmConfig, ResellerPartner
 from app.schemas import (
     ListEnvelope,
     ResellerLifecycleActionRequest,
@@ -54,18 +54,23 @@ def to_reseller_schema(db: Session, reseller: ResellerPartner) -> ResellerPartne
     )
 
 
-def to_reseller_defaults_schema(defaults) -> ResellerTenantDefaultsSummary:
-    return ResellerTenantDefaultsSummary.model_validate(
-        {
-            **json.loads(serialize_model(defaults)),
-            "default_feature_flags_json": json.loads(defaults.default_feature_flags_json or "{}"),
-            "default_service_tier": (
-                ServiceTierDefinitionSummary.model_validate(defaults.default_service_tier, from_attributes=True)
-                if defaults.default_service_tier is not None
-                else None
-            ),
-        }
-    )
+def to_reseller_defaults_schema(db: Session, defaults) -> ResellerTenantDefaultsSummary:
+    payload = {
+        **json.loads(serialize_model(defaults)),
+        "default_feature_flags_json": json.loads(defaults.default_feature_flags_json or "{}"),
+        "default_service_tier": (
+            ServiceTierDefinitionSummary.model_validate(defaults.default_service_tier, from_attributes=True)
+            if defaults.default_service_tier is not None
+            else None
+        ),
+    }
+    if defaults.default_credential_mode == "platform_managed" and defaults.default_platform_managed_config_id:
+        platform_config = db.get(PlatformManagedLlmConfig, defaults.default_platform_managed_config_id)
+        if platform_config is not None:
+            payload["default_provider_type"] = platform_config.provider_type
+            payload["default_model_name"] = platform_config.model_name
+            payload["default_endpoint_url"] = platform_config.endpoint_url
+    return ResellerTenantDefaultsSummary.model_validate(payload)
 
 
 @router.get("", response_model=ListEnvelope[ResellerPartnerSchema])
@@ -271,7 +276,7 @@ def get_reseller_tenant_defaults(
     defaults = get_or_create_reseller_defaults(db, reseller)
     db.commit()
     db.refresh(defaults)
-    resource = to_reseller_defaults_schema(defaults)
+    resource = to_reseller_defaults_schema(db, defaults)
     return ResourceEnvelope[ResellerTenantDefaultsSummary](resource=resource, updated_at=defaults.updated_at)
 
 
@@ -300,10 +305,18 @@ def update_reseller_tenant_defaults(
     elif "default_plan_tier" in updates and updates["default_plan_tier"]:
         updates.pop("default_plan_tier")
     feature_flags = updates.pop("default_feature_flags_json", {})
+    requested_platform_managed_config_id = updates.get("default_platform_managed_config_id")
+    requested_credential_mode = updates.get("default_credential_mode", defaults.default_credential_mode)
     for key, value in updates.items():
         setattr(defaults, key, value)
     if requested_tier is not None:
         sync_reseller_default_service_tier_fields(defaults, requested_tier)
+    if requested_credential_mode == "platform_managed" and requested_platform_managed_config_id:
+        defaults.default_provider_type = None
+        defaults.default_model_name = None
+        defaults.default_endpoint_url = None
+    elif requested_credential_mode != "platform_managed":
+        defaults.default_platform_managed_config_id = None
     defaults.default_feature_flags_json = json.dumps(feature_flags, sort_keys=True)
 
     write_audit_log(
@@ -319,5 +332,5 @@ def update_reseller_tenant_defaults(
     db.commit()
     db.refresh(defaults)
 
-    resource = to_reseller_defaults_schema(defaults)
+    resource = to_reseller_defaults_schema(db, defaults)
     return ResourceEnvelope[ResellerTenantDefaultsSummary](resource=resource, updated_at=defaults.updated_at)

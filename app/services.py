@@ -2866,16 +2866,21 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
         active_groups_query = active_groups_query.where(Group.tenant_id == scope_id)
         tenant_count = 1
         session_user_count = (
-            db.scalar(
-                select(func.count())
-                .select_from(UserTenantMembership)
-                .join(UserMembershipProfile, UserMembershipProfile.tenant_membership_id == UserTenantMembership.id)
-                .where(
-                    UserTenantMembership.tenant_id == scope_id,
-                    UserTenantMembership.status == "active",
-                    UserMembershipProfile.sessions_count > 0,
-                )
-            )
+            db.execute(
+                text(
+                    """
+                    select count(distinct m.user_id_hash)
+                    from user_tenant_membership m
+                    join (
+                      select distinct user_id_hash
+                      from conversations
+                    ) conv on conv.user_id_hash = m.user_id_hash
+                    where m.tenant_id = :tenant_id
+                      and m.status = 'active'
+                    """
+                ),
+                {"tenant_id": scope_id},
+            ).scalar()
             or 0
         )
     elif scope_type == "group":
@@ -2893,31 +2898,43 @@ def build_report_payload(db: Session, scope_type: str, scope_id: str, start_date
         active_users_query = active_users_query.where(UserTenantMembership.tenant_id.in_(tenant_ids))
         active_groups_query = active_groups_query.where(Group.tenant_id.in_(tenant_ids))
         tenant_count = len(tenant_ids)
-        session_user_count = (
-            db.scalar(
-                select(func.count())
-                .select_from(UserTenantMembership)
-                .join(UserMembershipProfile, UserMembershipProfile.tenant_membership_id == UserTenantMembership.id)
-                .where(
-                    UserTenantMembership.tenant_id.in_(tenant_ids),
-                    UserTenantMembership.status == "active",
-                    UserMembershipProfile.sessions_count > 0,
-                )
+        if tenant_ids:
+            session_user_count = (
+                db.execute(
+                    text(
+                        """
+                        select count(distinct m.user_id_hash)
+                        from user_tenant_membership m
+                        join (
+                          select distinct user_id_hash
+                          from conversations
+                        ) conv on conv.user_id_hash = m.user_id_hash
+                        where m.tenant_id in :tenant_ids
+                          and m.status = 'active'
+                        """
+                    ).bindparams(bindparam("tenant_ids", expanding=True)),
+                    {"tenant_ids": tenant_ids},
+                ).scalar()
+                or 0
             )
-            or 0
-        )
+        else:
+            session_user_count = 0
     else:
         tenant_count = db.scalar(tenant_count_query) or 0
         session_user_count = (
-            db.scalar(
-                select(func.count())
-                .select_from(UserTenantMembership)
-                .join(UserMembershipProfile, UserMembershipProfile.tenant_membership_id == UserTenantMembership.id)
-                .where(
-                    UserTenantMembership.status == "active",
-                    UserMembershipProfile.sessions_count > 0,
+            db.execute(
+                text(
+                    """
+                    select count(distinct m.user_id_hash)
+                    from user_tenant_membership m
+                    join (
+                      select distinct user_id_hash
+                      from conversations
+                    ) conv on conv.user_id_hash = m.user_id_hash
+                    where m.status = 'active'
+                    """
                 )
-            )
+            ).scalar()
             or 0
         )
 
@@ -3086,19 +3103,11 @@ def upsert_user_membership_profile(
 ) -> UserMembershipProfile:
     profile = membership.profile or UserMembershipProfile(tenant_membership_id=membership.id)
     for key in [
-        "first_name",
-        "last_name",
-        "email",
         "title",
         "initial_user_type",
-        "utilization_level",
-        "sessions_count",
-        "avg_improvement_pct",
     ]:
         if key in payload and payload[key] is not None:
             setattr(profile, key, payload[key])
-    if "last_activity_at" in payload:
-        profile.last_activity_at = payload["last_activity_at"]  # type: ignore[assignment]
     db.add(profile)
     membership.profile = profile
     return profile
@@ -3263,11 +3272,18 @@ def apply_reseller_defaults_to_tenant(
         or (defaults.default_provider_type and defaults.default_model_name)
     )
     if should_seed_llm and tenant.llm_config is None:
+        provider_type = defaults.default_provider_type
+        model_name = defaults.default_model_name
+        endpoint_url = defaults.default_endpoint_url
+        if defaults.default_platform_managed_config_id:
+            provider_type = None
+            model_name = None
+            endpoint_url = None
         llm_config = TenantLLMConfig(
             tenant_id=tenant.id,
-            provider_type=defaults.default_provider_type,
-            model_name=defaults.default_model_name,
-            endpoint_url=defaults.default_endpoint_url,
+            provider_type=provider_type,
+            model_name=model_name,
+            endpoint_url=endpoint_url,
             platform_managed_config_id=defaults.default_platform_managed_config_id,
             credential_mode=defaults.default_credential_mode,
             transformation_enabled=defaults.default_transformation_enabled,

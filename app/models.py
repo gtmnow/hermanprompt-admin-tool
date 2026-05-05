@@ -205,15 +205,8 @@ class UserMembershipProfile(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     tenant_membership_id: Mapped[str] = mapped_column(ForeignKey("user_tenant_membership.id"), unique=True, index=True)
-    first_name: Mapped[str | None] = mapped_column(String(100))
-    last_name: Mapped[str | None] = mapped_column(String(100))
-    email: Mapped[str | None] = mapped_column(String(200))
     title: Mapped[str | None] = mapped_column(String(100))
     initial_user_type: Mapped[int | None] = mapped_column(Integer)
-    utilization_level: Mapped[str | None] = mapped_column(String(50))
-    sessions_count: Mapped[int] = mapped_column(Integer, default=0)
-    avg_improvement_pct: Mapped[int | None] = mapped_column(Integer)
-    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     membership: Mapped["UserTenantMembership"] = relationship(back_populates="profile")
 

@@ -32,6 +32,7 @@ from app.services import (
     get_canonical_user_id_hash,
     get_tenant_or_404,
     get_auth_users,
+    get_auth_user_identity,
     normalize_email,
     parse_datetime,
     refresh_onboarding_state,
@@ -61,6 +62,22 @@ def string_value(value: object | None) -> str | None:
 
 def safe_datetime(value: object | None):
     return parse_datetime(value) if isinstance(value, (str, datetime)) else None
+
+
+def split_display_name(display_name: str | None) -> tuple[str | None, str | None]:
+    normalized = string_value(display_name)
+    if not normalized:
+        return None, None
+    parts = normalized.split(" ", 1)
+    return parts[0], parts[1] if len(parts) > 1 else None
+
+
+def auth_identity_for_membership(db: Session, membership: UserTenantMembership) -> dict[str, object] | None:
+    auth_rows = get_auth_users(db, membership.user_id_hash)
+    auth_row = next((row for row in auth_rows if str(row.get("tenant_id")) in auth_tenant_candidates(membership.tenant)), None)
+    if auth_row is not None:
+        return auth_row
+    return get_auth_user_identity(db, user_id_hash=membership.user_id_hash)
 
 
 def ensure_single_tenant_membership(
@@ -296,8 +313,7 @@ def auth_row_to_summary(
     include_detail_sections: bool = True,
 ) -> UserMembershipSummary:
     display_name = string_value(row.get("display_name")) or ""
-    first_name = display_name.split(" ", 1)[0] if display_name else None
-    last_name = display_name.split(" ", 1)[1] if display_name and " " in display_name else None
+    first_name, last_name = split_display_name(display_name)
     row_user_id_hash = string_value(row.get("user_id_hash")) or "unknown-user"
     row_tenant_id = string_value(row.get("tenant_id")) or tenant_id
     detail_level = float(row["detail_level"]) if row.get("detail_level") is not None else None
@@ -341,19 +357,19 @@ def auth_row_to_summary(
         updated_at=updated_at,
         group_memberships=[UserGroupMembershipSummary(group_id=item.group_id) for item in group_memberships],
         profile=UserMembershipProfileSummary(
-            first_name=profile.first_name if profile and profile.first_name is not None else first_name,
-            last_name=profile.last_name if profile and profile.last_name is not None else last_name,
-            email=string_value(row.get("email")) if row.get("email") else profile.email if profile else None,
+            first_name=first_name,
+            last_name=last_name,
+            email=string_value(row.get("email")),
             title=profile.title if profile and profile.title is not None else ("Admin" if admin_role is not None else "Member"),
             initial_user_type=profile.initial_user_type if profile and profile.initial_user_type is not None else None,
-            utilization_level=profile.utilization_level if profile and profile.utilization_level is not None else utilization_level,
+            utilization_level=utilization_level,
             sessions_count=sessions_count,
             avg_improvement_pct=resolved_avg_improvement_pct(
                 sessions_count=sessions_count,
-                profile_avg_improvement_pct=profile.avg_improvement_pct if profile else None,
+                profile_avg_improvement_pct=None,
                 derived_avg_improvement_pct=avg_improvement_pct,
             ),
-            last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
+            last_activity_at=safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
         ),
         status_summary=build_status_summary(membership_status, row, invitation),
         invitation_summary=build_invitation_summary(invitation),
@@ -372,6 +388,21 @@ def to_user_summary(
         db.scalars(select(UserGroupMembership).where(UserGroupMembership.tenant_membership_id == membership.id))
     )
     invitation = latest_invitation_for_user(db, membership.user_id_hash, membership.tenant_id)
+    auth_identity = auth_identity_for_membership(db, membership)
+    display_name = string_value(auth_identity.get("display_name")) if auth_identity else None
+    first_name, last_name = split_display_name(display_name)
+    auth_email = string_value(auth_identity.get("email")) if auth_identity else None
+    auth_sessions = int(auth_identity.get("sessions_count") or 0) if auth_identity else 0
+    auth_structure = float(auth_identity["structure"]) if auth_identity and auth_identity.get("structure") is not None else None
+    auth_detail_level = float(auth_identity["detail_level"]) if auth_identity and auth_identity.get("detail_level") is not None else None
+    utilization_level = None
+    if auth_detail_level is not None:
+        if auth_detail_level >= 0.7:
+            utilization_level = "high"
+        elif auth_detail_level >= 0.4:
+            utilization_level = "medium"
+        else:
+            utilization_level = "low"
     return UserMembershipSummary(
         id=membership.id,
         user_id_hash=membership.user_id_hash,
@@ -384,9 +415,23 @@ def to_user_summary(
             UserGroupMembershipSummary(group_id=item.group_id) for item in group_memberships
         ],
         profile=(
-            UserMembershipProfileSummary.model_validate(membership.profile, from_attributes=True)
-            if membership.profile
-            else None
+            UserMembershipProfileSummary(
+                first_name=first_name,
+                last_name=last_name,
+                email=auth_email,
+                title=membership.profile.title if membership.profile and membership.profile.title else "Member",
+                initial_user_type=membership.profile.initial_user_type if membership.profile else None,
+                utilization_level=utilization_level,
+                sessions_count=auth_sessions,
+                avg_improvement_pct=resolved_avg_improvement_pct(
+                    sessions_count=auth_sessions,
+                    profile_avg_improvement_pct=None,
+                    derived_avg_improvement_pct=int(round(auth_structure * 100)) if auth_structure is not None else None,
+                ),
+                last_activity_at=(
+                    safe_datetime(auth_identity.get("last_activity_at")) if auth_identity else None
+                ) or (safe_datetime(auth_identity.get("last_login_at")) if auth_identity else None),
+            )
         ),
         status_summary=build_status_summary(membership.status, None, invitation),
         invitation_summary=build_invitation_summary(invitation),
@@ -463,9 +508,11 @@ def safe_membership_to_summary(
     except Exception:
         fallback_created_at = membership.created_at or datetime.now(timezone.utc)
         fallback_updated_at = membership.updated_at or fallback_created_at
-        fallback_email = membership.profile.email if membership.profile and membership.profile.email else None
-        fallback_first_name = membership.profile.first_name if membership.profile else None
-        fallback_last_name = membership.profile.last_name if membership.profile else None
+        auth_identity = auth_identity_for_membership(db, membership)
+        fallback_email = string_value(auth_identity.get("email")) if auth_identity else None
+        fallback_first_name, fallback_last_name = split_display_name(
+            string_value(auth_identity.get("display_name")) if auth_identity else None
+        )
 
         return UserMembershipSummary(
             id=membership.id,
@@ -480,17 +527,13 @@ def safe_membership_to_summary(
                 first_name=fallback_first_name,
                 last_name=fallback_last_name,
                 email=fallback_email,
-            title=membership.profile.title if membership.profile and membership.profile.title else "Member",
-            initial_user_type=membership.profile.initial_user_type if membership.profile else None,
-            utilization_level=membership.profile.utilization_level if membership.profile else None,
-            sessions_count=membership.profile.sessions_count if membership.profile else 0,
-            avg_improvement_pct=resolved_avg_improvement_pct(
-                sessions_count=membership.profile.sessions_count if membership.profile else 0,
-                profile_avg_improvement_pct=membership.profile.avg_improvement_pct if membership.profile else None,
-                derived_avg_improvement_pct=None,
+                title=membership.profile.title if membership.profile and membership.profile.title else "Member",
+                initial_user_type=membership.profile.initial_user_type if membership.profile else None,
+                utilization_level=None,
+                sessions_count=int(auth_identity.get("sessions_count") or 0) if auth_identity else 0,
+                avg_improvement_pct=None,
+                last_activity_at=safe_datetime(auth_identity.get("last_activity_at")) if auth_identity else None,
             ),
-            last_activity_at=membership.profile.last_activity_at if membership.profile else None,
-        ),
             status_summary=UserStatusSummary(
                 badge=membership.status,
                 detail="This user membership has incomplete related data, so Herman Admin is showing a safe fallback view.",
@@ -517,8 +560,7 @@ def auth_row_to_list_summary(
     admin_role: UserAdminRoleSummary | None,
 ) -> UserMembershipSummary:
     display_name = string_value(row.get("display_name")) or ""
-    first_name = display_name.split(" ", 1)[0] if display_name else None
-    last_name = display_name.split(" ", 1)[1] if display_name and " " in display_name else None
+    first_name, last_name = split_display_name(display_name)
     row_user_id_hash = string_value(row.get("user_id_hash")) or "unknown-user"
     row_tenant_id = string_value(row.get("tenant_id")) or tenant_id
     detail_level = float(row["detail_level"]) if row.get("detail_level") is not None else None
@@ -560,19 +602,19 @@ def auth_row_to_list_summary(
         updated_at=updated_at,
         group_memberships=[UserGroupMembershipSummary(group_id=item.group_id) for item in group_memberships],
         profile=UserMembershipProfileSummary(
-            first_name=profile.first_name if profile and profile.first_name is not None else first_name,
-            last_name=profile.last_name if profile and profile.last_name is not None else last_name,
-            email=string_value(row.get("email")) if row.get("email") else profile.email if profile else None,
+            first_name=first_name,
+            last_name=last_name,
+            email=string_value(row.get("email")),
             title=profile.title if profile and profile.title is not None else ("Admin" if admin_role is not None else "Member"),
             initial_user_type=profile.initial_user_type if profile and profile.initial_user_type is not None else None,
-            utilization_level=profile.utilization_level if profile and profile.utilization_level is not None else utilization_level,
+            utilization_level=utilization_level,
             sessions_count=sessions_count,
             avg_improvement_pct=resolved_avg_improvement_pct(
                 sessions_count=sessions_count,
-                profile_avg_improvement_pct=profile.avg_improvement_pct if profile else None,
+                profile_avg_improvement_pct=None,
                 derived_avg_improvement_pct=avg_improvement_pct,
             ),
-            last_activity_at=profile.last_activity_at if profile and profile.last_activity_at is not None else safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
+            last_activity_at=safe_datetime(row.get("last_activity_at")) or safe_datetime(row.get("last_login_at")),
         ),
         status_summary=build_status_summary(membership_status, row, None),
         invitation_summary=None,
@@ -590,6 +632,21 @@ def membership_to_list_summary(
     group_memberships = list(
         db.scalars(select(UserGroupMembership).where(UserGroupMembership.tenant_membership_id == membership.id))
     )
+    auth_identity = auth_identity_for_membership(db, membership)
+    display_name = string_value(auth_identity.get("display_name")) if auth_identity else None
+    first_name, last_name = split_display_name(display_name)
+    auth_email = string_value(auth_identity.get("email")) if auth_identity else None
+    auth_sessions = int(auth_identity.get("sessions_count") or 0) if auth_identity else 0
+    auth_structure = float(auth_identity["structure"]) if auth_identity and auth_identity.get("structure") is not None else None
+    auth_detail_level = float(auth_identity["detail_level"]) if auth_identity and auth_identity.get("detail_level") is not None else None
+    utilization_level = None
+    if auth_detail_level is not None:
+        if auth_detail_level >= 0.7:
+            utilization_level = "high"
+        elif auth_detail_level >= 0.4:
+            utilization_level = "medium"
+        else:
+            utilization_level = "low"
     return UserMembershipSummary(
         id=membership.id,
         user_id_hash=membership.user_id_hash,
@@ -603,21 +660,23 @@ def membership_to_list_summary(
         ],
         profile=(
             UserMembershipProfileSummary(
-                first_name=membership.profile.first_name,
-                last_name=membership.profile.last_name,
-                email=membership.profile.email,
-                title=membership.profile.title,
-                initial_user_type=membership.profile.initial_user_type,
-                utilization_level=membership.profile.utilization_level,
-                sessions_count=membership.profile.sessions_count,
+                first_name=first_name,
+                last_name=last_name,
+                email=auth_email,
+                title=membership.profile.title if membership.profile else None,
+                initial_user_type=membership.profile.initial_user_type if membership.profile else None,
+                utilization_level=utilization_level,
+                sessions_count=auth_sessions,
                 avg_improvement_pct=resolved_avg_improvement_pct(
-                    sessions_count=membership.profile.sessions_count,
-                    profile_avg_improvement_pct=membership.profile.avg_improvement_pct,
-                    derived_avg_improvement_pct=None,
+                    sessions_count=auth_sessions,
+                    profile_avg_improvement_pct=None,
+                    derived_avg_improvement_pct=int(round(auth_structure * 100)) if auth_structure is not None else None,
                 ),
-                last_activity_at=membership.profile.last_activity_at,
+                last_activity_at=(
+                    safe_datetime(auth_identity.get("last_activity_at")) if auth_identity else None
+                ) or (safe_datetime(auth_identity.get("last_login_at")) if auth_identity else None),
             )
-            if membership.profile
+            if membership.profile or auth_identity
             else None
         ),
         status_summary=build_status_summary(membership.status, None, None),
@@ -886,24 +945,18 @@ def update_user_membership(
     auth_row = before_rows[0] if before_rows else None
     current_email = normalize_email(payload.email) if payload.email is not None else (normalize_email(str(auth_row["email"])) if auth_row else None)
     if current_email is None:
-        current_email = normalize_email(membership.profile.email if membership and membership.profile else None)
+        current_email = None
     if current_email is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
 
     current_display_name = str(auth_row["display_name"]) if auth_row and auth_row.get("display_name") else None
-    if current_display_name is None and membership and membership.profile:
-        current_display_name = build_display_name(membership.profile.first_name, membership.profile.last_name)
+    if current_display_name is None and membership is not None:
+        identity = auth_identity_for_membership(db, membership)
+        current_display_name = string_value(identity.get("display_name")) if identity else None
     current_first_name = payload.first_name
     current_last_name = payload.last_name
-    if membership and membership.profile:
-        if current_first_name is None:
-            current_first_name = membership.profile.first_name
-        if current_last_name is None:
-            current_last_name = membership.profile.last_name
     if auth_row and current_first_name is None and current_last_name is None and current_display_name:
-        parts = current_display_name.split(" ", 1)
-        current_first_name = parts[0]
-        current_last_name = parts[1] if len(parts) > 1 else None
+        current_first_name, current_last_name = split_display_name(current_display_name)
 
     if membership is None:
         ensure_single_tenant_membership(db, user_id_hash=user_id_hash, target_tenant=tenant)
@@ -954,13 +1007,7 @@ def update_user_membership(
         for key, value in payload.model_dump(exclude_none=True, mode="json").items()
         if key
         in {
-            "first_name",
-            "last_name",
-            "email",
             "title",
-            "utilization_level",
-            "sessions_count",
-            "avg_improvement_pct",
         }
     }
     if profile_updates:
@@ -1015,15 +1062,15 @@ def run_user_lifecycle_action(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     current_email = normalize_email(str(auth_row["email"])) if auth_row and auth_row.get("email") else None
-    if current_email is None and membership and membership.profile:
-        current_email = normalize_email(membership.profile.email)
-    current_first_name = membership.profile.first_name if membership and membership.profile else None
-    current_last_name = membership.profile.last_name if membership and membership.profile else None
+    current_first_name = None
+    current_last_name = None
     current_display_name = (
         str(auth_row["display_name"])
         if auth_row and auth_row.get("display_name")
-        else build_display_name(current_first_name, current_last_name)
+        else None
     )
+    if current_display_name:
+        current_first_name, current_last_name = split_display_name(current_display_name)
     if current_email is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User email is required for this action")
 
@@ -1117,8 +1164,6 @@ def run_user_lifecycle_action(
             admin_user.is_active = False
             db.execute(delete(AdminScope).where(AdminScope.admin_user_id == admin_user.id))
 
-    if membership is not None and membership.profile is not None and target_tenant.id != tenant.id:
-        membership.profile.email = current_email
     refresh_onboarding_state(db, tenant.id)
     if target_tenant.id != tenant.id:
         refresh_onboarding_state(db, target_tenant.id)
