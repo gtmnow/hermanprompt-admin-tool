@@ -1,12 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import TenantOnboardingStatus
 from app.schemas import ListEnvelope, ResourceEnvelope, TenantOnboardingStatus as TenantOnboardingStatusSchema
 from app.security import Principal, require_permission
-from app.services import ensure_scope_access, get_tenant_or_404, refresh_onboarding_state, table_exists
+from app.services import (
+    ensure_scope_access,
+    get_tenant_or_404,
+    refresh_onboarding_state,
+    table_exists,
+    tenant_onboarding_status_orm_compatible,
+)
 
 router = APIRouter()
 
@@ -20,8 +26,16 @@ def list_onboarding_statuses(
         return ListEnvelope[TenantOnboardingStatusSchema](items=[], page=1, page_size=1, total_count=0, filters={})
 
     items = []
-    for onboarding in db.scalars(select(TenantOnboardingStatus).order_by(TenantOnboardingStatus.updated_at.desc())):
-        tenant = get_tenant_or_404(db, onboarding.tenant_id)
+    if tenant_onboarding_status_orm_compatible(db):
+        tenant_ids = [onboarding.tenant_id for onboarding in db.scalars(select(TenantOnboardingStatus).order_by(TenantOnboardingStatus.updated_at.desc()))]
+    else:
+        tenant_ids = [
+            row["tenant_id"]
+            for row in db.execute(text("select tenant_id from tenant_onboarding_status order by updated_at desc")).mappings()
+        ]
+
+    for tenant_id in tenant_ids:
+        tenant = get_tenant_or_404(db, tenant_id)
         try:
             ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
         except HTTPException as exc:
