@@ -72,6 +72,16 @@ class ActivationOverrideRequest(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
 
 
+def request_transformer(method: str, path: str, **kwargs: object) -> dict:
+    try:
+        return transformer_client.request(method, path, **kwargs)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Prompt Transformer request failed: {exc}",
+        ) from exc
+
+
 def normalize_secret_source(value: str | None) -> str:
     if value in {"vault_managed", "external_reference", "none"}:
         return value
@@ -882,7 +892,7 @@ def get_tenant_knowledge(
 ) -> ResourceEnvelope[TenantKnowledgeSummary]:
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
-    payload = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    payload = request_transformer("GET", f"/api/rag/tenant-documents/{tenant.id}")
     return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(payload))
 
 
@@ -895,7 +905,7 @@ def upload_tenant_knowledge_document(
 ) -> ResourceEnvelope[TenantKnowledgeSummary]:
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
-    transformer_client.request(
+    request_transformer(
         "POST",
         "/api/rag/tenant-documents",
         data={"tenant_id": tenant.id, "uploaded_by_admin_user_id": principal.admin_id},
@@ -903,7 +913,7 @@ def upload_tenant_knowledge_document(
     )
     refresh_onboarding_state(db, tenant.id)
     db.commit()
-    payload = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    payload = request_transformer("GET", f"/api/rag/tenant-documents/{tenant.id}")
     return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(payload))
 
 
@@ -916,10 +926,10 @@ def delete_tenant_knowledge_document(
 ) -> ResourceEnvelope[TenantKnowledgeSummary]:
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
-    transformer_client.request("DELETE", f"/api/rag/tenant-documents/{document_id}", params={"tenant_id": tenant.id})
+    request_transformer("DELETE", f"/api/rag/tenant-documents/{document_id}", params={"tenant_id": tenant.id})
     refresh_onboarding_state(db, tenant.id)
     db.commit()
-    payload = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    payload = request_transformer("GET", f"/api/rag/tenant-documents/{tenant.id}")
     return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(payload))
 
 
@@ -932,10 +942,10 @@ def reprocess_tenant_knowledge_document(
 ) -> ResourceEnvelope[TenantKnowledgeSummary]:
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
-    transformer_client.request("POST", f"/api/rag/documents/{document_id}/reprocess")
+    request_transformer("POST", f"/api/rag/documents/{document_id}/reprocess")
     refresh_onboarding_state(db, tenant.id)
     db.commit()
-    payload = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    payload = request_transformer("GET", f"/api/rag/tenant-documents/{tenant.id}")
     return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(payload))
 
 
@@ -948,9 +958,9 @@ def update_tenant_knowledge_collection(
 ) -> ResourceEnvelope[TenantKnowledgeSummary]:
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
-    current = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
-    transformer_client.request("PATCH", f"/api/rag/collections/{current['collection']['id']}", json=payload.model_dump(exclude_none=True))
-    refreshed = transformer_client.request("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    current = request_transformer("GET", f"/api/rag/tenant-documents/{tenant.id}")
+    request_transformer("PATCH", f"/api/rag/collections/{current['collection']['id']}", json=payload.model_dump(exclude_none=True))
+    refreshed = request_transformer("GET", f"/api/rag/tenant-documents/{tenant.id}")
     return ResourceEnvelope[TenantKnowledgeSummary](resource=_map_tenant_knowledge(refreshed))
 
 
