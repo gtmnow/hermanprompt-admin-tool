@@ -90,10 +90,16 @@ def to_tenant_schema(tenant: Tenant) -> TenantSchema:
     return TenantSchema.model_validate(tenant, from_attributes=True)
 
 
-def to_llm_schema(config: TenantLLMConfig | None) -> TenantLLMConfigSchema | None:
+def to_llm_schema(db: Session, config: TenantLLMConfig | None) -> TenantLLMConfigSchema | None:
     if config is None:
         return None
     payload = json.loads(serialize_model(config))
+    if payload.get("credential_mode") == "platform_managed" and payload.get("platform_managed_config_id"):
+        platform_config = db.get(PlatformManagedLlmConfig, payload["platform_managed_config_id"])
+        if platform_config is not None:
+            payload["provider_type"] = platform_config.provider_type
+            payload["model_name"] = platform_config.model_name
+            payload["endpoint_url"] = platform_config.endpoint_url
     payload["secret_source"] = normalize_secret_source(payload.get("secret_source"))
     payload["credential_mode"] = normalize_credential_mode(payload.get("credential_mode"))
     return TenantLLMConfigSchema.model_validate(payload)
@@ -143,7 +149,7 @@ def to_summary(db: Session, tenant: Tenant) -> TenantSummary:
         ),
         profile=profile,
         portal_config=to_portal_schema(tenant),
-        llm_config=to_llm_schema(tenant.llm_config),
+        llm_config=to_llm_schema(db, tenant.llm_config),
         runtime_settings=to_runtime_schema(tenant.runtime_settings),
     )
 
@@ -613,7 +619,7 @@ def get_llm_config(
 ) -> ResourceEnvelope[TenantLLMConfigSchema | None]:
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
-    return ResourceEnvelope[TenantLLMConfigSchema | None](resource=to_llm_schema(tenant.llm_config), updated_at=tenant.updated_at)
+    return ResourceEnvelope[TenantLLMConfigSchema | None](resource=to_llm_schema(db, tenant.llm_config), updated_at=tenant.updated_at)
 
 
 @router.put("/{tenant_id}/llm-config", response_model=ResourceEnvelope[TenantLLMConfigSchema])
@@ -627,11 +633,8 @@ def upsert_llm_config(
     tenant = get_tenant_or_404(db, tenant_id)
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
 
-    llm_config = tenant.llm_config or TenantLLMConfig(tenant_id=tenant.id, provider_type="", model_name="")
+    llm_config = tenant.llm_config or TenantLLMConfig(tenant_id=tenant.id)
     before = serialize_model(llm_config) if tenant.llm_config else None
-    llm_config.provider_type = payload.provider_type
-    llm_config.model_name = payload.model_name
-    llm_config.endpoint_url = payload.endpoint_url
     llm_config.platform_managed_config_id = payload.platform_managed_config_id
     llm_config.credential_mode = payload.credential_mode
     llm_config.transformation_enabled = payload.transformation_enabled
@@ -645,15 +648,18 @@ def upsert_llm_config(
         platform_config = db.get(PlatformManagedLlmConfig, payload.platform_managed_config_id)
         if platform_config is None or not platform_config.is_active:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected platform-managed LLM is not available")
-        llm_config.provider_type = platform_config.provider_type
-        llm_config.model_name = platform_config.model_name
-        llm_config.endpoint_url = platform_config.endpoint_url
+        llm_config.provider_type = None
+        llm_config.model_name = None
+        llm_config.endpoint_url = None
         llm_config.secret_reference = platform_config.secret_reference
         llm_config.api_key_masked = platform_config.api_key_masked
         llm_config.secret_source = platform_config.secret_source
         llm_config.vault_provider = platform_config.vault_provider
     else:
         llm_config.platform_managed_config_id = None
+        llm_config.provider_type = payload.provider_type
+        llm_config.model_name = payload.model_name
+        llm_config.endpoint_url = payload.endpoint_url
         if payload.api_key:
             stored = store_managed_secret(
                 db,
@@ -700,7 +706,7 @@ def upsert_llm_config(
     )
     db.commit()
     db.refresh(llm_config)
-    return ResourceEnvelope[TenantLLMConfigSchema](resource=to_llm_schema(llm_config), updated_at=llm_config.updated_at)
+    return ResourceEnvelope[TenantLLMConfigSchema](resource=to_llm_schema(db, llm_config), updated_at=llm_config.updated_at)
 
 
 @router.post("/{tenant_id}/llm-config/validate", response_model=ResourceEnvelope[TenantValidationResult])
@@ -729,22 +735,26 @@ def validate_llm_config(
                 llm_config.last_validation_message = "Selected platform-managed LLM is no longer available"
                 resolution = resolve_secret_reference(db, None)
             else:
-                llm_config.provider_type = platform_config.provider_type
-                llm_config.model_name = platform_config.model_name
-                llm_config.endpoint_url = platform_config.endpoint_url
                 llm_config.secret_reference = platform_config.secret_reference
                 llm_config.api_key_masked = platform_config.api_key_masked
                 resolution = resolve_secret_reference(db, llm_config.secret_reference)
                 live_test_result = validate_platform_llm_runtime(
                     db,
-                    provider_type=llm_config.provider_type,
-                    model_name=llm_config.model_name,
-                    endpoint_url=llm_config.endpoint_url,
+                    provider_type=platform_config.provider_type,
+                    model_name=platform_config.model_name,
+                    endpoint_url=platform_config.endpoint_url,
                     secret_reference=llm_config.secret_reference,
                 )
     else:
         resolution = resolve_secret_reference(db, llm_config.secret_reference)
-    if not llm_config.provider_type or not llm_config.model_name:
+    effective_provider = llm_config.provider_type
+    effective_model = llm_config.model_name
+    if llm_config.credential_mode == "platform_managed" and llm_config.platform_managed_config_id:
+        platform_config = db.get(PlatformManagedLlmConfig, llm_config.platform_managed_config_id)
+        if platform_config is not None:
+            effective_provider = platform_config.provider_type
+            effective_model = platform_config.model_name
+    if not effective_provider or not effective_model:
         llm_config.credential_status = "invalid"
         llm_config.last_validation_message = "Provider and model are required"
     elif not llm_config.secret_reference:

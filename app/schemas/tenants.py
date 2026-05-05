@@ -80,8 +80,8 @@ class TenantPortalConfig(BaseModel):
 
 
 class TenantLLMConfig(BaseModel):
-    provider_type: str = Field(min_length=1, max_length=100)
-    model_name: str = Field(min_length=1, max_length=200)
+    provider_type: str | None = Field(default=None, min_length=1, max_length=100)
+    model_name: str | None = Field(default=None, min_length=1, max_length=200)
     endpoint_url: str | None = None
     api_key_masked: str | None = None
     secret_reference: str | None = None

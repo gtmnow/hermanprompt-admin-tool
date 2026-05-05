@@ -1098,7 +1098,6 @@ def run_user_lifecycle_action(
             last_name=current_last_name,
             display_name=current_display_name,
             status="inactive",
-            is_admin=False,
         )
         if membership is None:
             membership = UserTenantMembership(

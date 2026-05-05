@@ -17,7 +17,6 @@ from app.db import engine
 from app.models import (
     AdminAuditLog,
     AdminPermission,
-    AdminProfile,
     AdminSession,
     AdminScope,
     AdminUser,
@@ -1334,29 +1333,6 @@ def sync_auth_user_admin_authority(db: Session, *, user_id_hash: str) -> bool:
     existing = get_auth_user_identity(db, user_id_hash=user_id_hash)
     if existing is None:
         return False
-
-    has_active_admin_assignment = db.scalar(
-        select(AdminUser.id).where(
-            AdminUser.user_id_hash == user_id_hash,
-            AdminUser.is_active.is_(True),
-        )
-    ) is not None
-    db.execute(
-        text(
-            """
-            update auth_users
-            set
-              is_admin = :is_admin,
-              updated_at = :updated_at
-            where user_id_hash = :user_id_hash
-            """
-        ),
-        {
-            "user_id_hash": user_id_hash,
-            "is_admin": has_active_admin_assignment,
-            "updated_at": datetime.utcnow(),
-        },
-    )
     return True
 
 
@@ -1405,7 +1381,6 @@ def sync_admin_identity_to_auth_user(
             set
               email = :email,
               display_name = :display_name,
-              is_admin = :is_admin,
               updated_at = :updated_at
             where user_id_hash = :user_id_hash
             """
@@ -1414,13 +1389,6 @@ def sync_admin_identity_to_auth_user(
             "user_id_hash": user_id_hash,
             "email": normalized_email if normalized_email is not None else existing.get("email"),
             "display_name": display_name if display_name is not None else existing.get("display_name"),
-            "is_admin": db.scalar(
-                select(AdminUser.id).where(
-                    AdminUser.user_id_hash == user_id_hash,
-                    AdminUser.is_active.is_(True),
-                )
-            )
-            is not None,
             "updated_at": datetime.utcnow(),
         },
     )
@@ -1433,12 +1401,6 @@ def resolve_admin_profile_summary(db: Session, admin: AdminUser) -> dict[str, st
         return {
             "display_name": str(auth_identity["display_name"]) if auth_identity.get("display_name") is not None else None,
             "email": str(auth_identity["email"]) if auth_identity.get("email") is not None else None,
-        }
-
-    if admin.profile is not None:
-        return {
-            "display_name": admin.profile.display_name,
-            "email": admin.profile.email,
         }
 
     return None
@@ -1454,7 +1416,6 @@ def upsert_auth_user(
     last_name: str | None = None,
     display_name: str | None = None,
     status: str = "active",
-    is_admin: bool | None = None,
 ) -> dict[str, object]:
     normalized_email = normalize_email(email)
     if normalized_email is None:
@@ -1484,13 +1445,6 @@ def upsert_auth_user(
         )
 
     existing = existing_by_user or existing_by_email
-    authoritative_admin_assignment = db.scalar(
-        select(AdminUser.id).where(
-            AdminUser.user_id_hash == user_id_hash,
-            AdminUser.is_active.is_(True),
-        )
-    ) is not None
-    resolved_is_admin = authoritative_admin_assignment if is_admin is None else bool(is_admin)
     now = datetime.utcnow()
     credentials_table_exists = has_auth_user_credentials_table(db)
     legacy_password_columns = auth_users_has_legacy_password_columns(db)
@@ -1505,7 +1459,6 @@ def upsert_auth_user(
                   display_name = :display_name,
                   tenant_id = :tenant_id,
                   is_active = :is_active,
-                  is_admin = :is_admin,
                   updated_at = :updated_at
                 where id = :id
                 """
@@ -1516,7 +1469,6 @@ def upsert_auth_user(
                 "display_name": resolved_display_name,
                 "tenant_id": auth_tenant_id,
                 "is_active": desired_is_active,
-                "is_admin": resolved_is_admin,
                 "updated_at": now,
             },
         )
@@ -1532,7 +1484,6 @@ def upsert_auth_user(
                       display_name,
                       tenant_id,
                       is_active,
-                      is_admin,
                       created_at,
                       updated_at,
                       last_login_at,
@@ -1544,7 +1495,6 @@ def upsert_auth_user(
                       :display_name,
                       :tenant_id,
                       :is_active,
-                      :is_admin,
                       :created_at,
                       :updated_at,
                       null,
@@ -1559,7 +1509,6 @@ def upsert_auth_user(
                     "display_name": resolved_display_name,
                     "tenant_id": auth_tenant_id,
                     "is_active": desired_is_active,
-                    "is_admin": resolved_is_admin,
                     "created_at": now,
                     "updated_at": now,
                 },
@@ -1574,7 +1523,6 @@ def upsert_auth_user(
                       display_name,
                       tenant_id,
                       is_active,
-                      is_admin,
                       created_at,
                       updated_at,
                       last_login_at
@@ -1584,7 +1532,6 @@ def upsert_auth_user(
                       :display_name,
                       :tenant_id,
                       :is_active,
-                      :is_admin,
                       :created_at,
                       :updated_at,
                       null
@@ -1597,7 +1544,6 @@ def upsert_auth_user(
                     "display_name": resolved_display_name,
                     "tenant_id": auth_tenant_id,
                     "is_active": desired_is_active,
-                    "is_admin": resolved_is_admin,
                     "created_at": now,
                     "updated_at": now,
                 },
@@ -2618,8 +2564,6 @@ def delete_tenant_and_users(db: Session, tenant: Tenant) -> list[str]:
         ) or 0
         if remaining_scope_count == 0:
             db.execute(delete(AdminPermission).where(AdminPermission.admin_user_id == admin.id))
-            if admin.profile is not None:
-                db.delete(admin.profile)
             db.delete(admin)
 
     if tenant.llm_config is not None:
@@ -3160,14 +3104,81 @@ def upsert_user_membership_profile(
     return profile
 
 
-def upsert_admin_profile(db: Session, admin: AdminUser, payload: dict[str, object]) -> AdminProfile:
-    profile = admin.profile or AdminProfile(admin_user_id=admin.id)
-    for key in ["display_name", "email"]:
-        if key in payload:
-            setattr(profile, key, payload[key])
-    db.add(profile)
-    admin.profile = profile
-    return profile
+def ensure_admin_auth_identity(
+    db: Session,
+    *,
+    user_id_hash: str,
+    email: str | None = None,
+    display_name: str | None = None,
+    is_active: bool = True,
+) -> bool:
+    synced = sync_admin_identity_to_auth_user(
+        db,
+        user_id_hash=user_id_hash,
+        email=email,
+        display_name=display_name,
+    )
+    if synced:
+        return True
+
+    normalized_email = normalize_email(email)
+    if normalized_email is None:
+        return False
+
+    conflicting_user = db.execute(
+        text(
+            """
+            select id
+            from auth_users
+            where lower(email) = :email
+              and user_id_hash != :user_id_hash
+            order by id desc
+            limit 1
+            """
+        ),
+        {"email": normalized_email, "user_id_hash": user_id_hash},
+    ).scalar_one_or_none()
+    if conflicting_user is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already assigned to a different auth user",
+        )
+
+    db.execute(
+        text(
+            """
+            insert into auth_users (
+              email,
+              user_id_hash,
+              display_name,
+              tenant_id,
+              is_active,
+              created_at,
+              updated_at,
+              last_login_at
+            ) values (
+              :email,
+              :user_id_hash,
+              :display_name,
+              :tenant_id,
+              :is_active,
+              :created_at,
+              :updated_at,
+              null
+            )
+            """
+        ),
+        {
+            "email": normalized_email,
+            "user_id_hash": user_id_hash,
+            "display_name": display_name or normalized_email,
+            "tenant_id": "",
+            "is_active": is_active,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        },
+    )
+    return True
 
 
 def get_or_create_reseller_defaults(db: Session, reseller: ResellerPartner) -> ResellerTenantDefaults:
@@ -3254,8 +3265,8 @@ def apply_reseller_defaults_to_tenant(
     if should_seed_llm and tenant.llm_config is None:
         llm_config = TenantLLMConfig(
             tenant_id=tenant.id,
-            provider_type=defaults.default_provider_type or "",
-            model_name=defaults.default_model_name or "",
+            provider_type=defaults.default_provider_type,
+            model_name=defaults.default_model_name,
             endpoint_url=defaults.default_endpoint_url,
             platform_managed_config_id=defaults.default_platform_managed_config_id,
             credential_mode=defaults.default_credential_mode,
@@ -3267,9 +3278,9 @@ def apply_reseller_defaults_to_tenant(
         if defaults.default_platform_managed_config_id:
             platform_config = db.get(PlatformManagedLlmConfig, defaults.default_platform_managed_config_id)
             if platform_config is not None:
-                llm_config.provider_type = platform_config.provider_type
-                llm_config.model_name = platform_config.model_name
-                llm_config.endpoint_url = platform_config.endpoint_url
+                llm_config.provider_type = None
+                llm_config.model_name = None
+                llm_config.endpoint_url = None
                 llm_config.secret_reference = platform_config.secret_reference
                 llm_config.api_key_masked = platform_config.api_key_masked
                 llm_config.secret_source = platform_config.secret_source
@@ -3315,8 +3326,13 @@ def seed_database(db: Session) -> None:
         db.add(admin)
         db.flush()
 
-    if admin.profile is None:
-        db.add(AdminProfile(admin_user_id=admin.id, display_name="Michael Anderson", email="michael@example.com"))
+    ensure_admin_auth_identity(
+        db,
+        user_id_hash=admin.user_id_hash,
+        email="michael@example.com",
+        display_name="Michael Anderson",
+        is_active=True,
+    )
 
     if not admin.scopes:
         db.add(AdminScope(admin_user_id=admin.id, scope_type="global"))

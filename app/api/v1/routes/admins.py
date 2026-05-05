@@ -15,8 +15,7 @@ from app.services import (
     resolve_admin_profile_summary,
     sync_auth_user_admin_authority,
     serialize_model,
-    sync_admin_identity_to_auth_user,
-    upsert_admin_profile,
+    ensure_admin_auth_identity,
     write_audit_log,
 )
 
@@ -111,9 +110,13 @@ def create_admin(
         if key in {"display_name", "email"} and value is not None
     }
     if profile_updates:
-        synced = sync_admin_identity_to_auth_user(db, user_id_hash=resolved_user_id_hash, **profile_updates)
-        if not synced:
-            upsert_admin_profile(db, admin, profile_updates)
+        ensure_admin_auth_identity(
+            db,
+            user_id_hash=resolved_user_id_hash,
+            email=profile_updates.get("email"),
+            display_name=profile_updates.get("display_name"),
+            is_active=admin.is_active,
+        )
     else:
         sync_auth_user_admin_authority(db, user_id_hash=resolved_user_id_hash)
 
@@ -188,9 +191,13 @@ def update_admin(
         if key in {"display_name", "email"}
     }
     if profile_updates:
-        synced = sync_admin_identity_to_auth_user(db, user_id_hash=admin.user_id_hash, **profile_updates)
-        if not synced:
-            upsert_admin_profile(db, admin, profile_updates)
+        ensure_admin_auth_identity(
+            db,
+            user_id_hash=admin.user_id_hash,
+            email=profile_updates.get("email"),
+            display_name=profile_updates.get("display_name"),
+            is_active=admin.is_active if payload.is_active is None else payload.is_active,
+        )
     else:
         sync_auth_user_admin_authority(db, user_id_hash=admin.user_id_hash)
     if payload.permissions is not None:

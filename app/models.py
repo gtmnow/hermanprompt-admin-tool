@@ -197,7 +197,6 @@ class AdminUser(TimestampMixin, Base):
         back_populates="admin_user",
         cascade="all, delete-orphan",
     )
-    profile: Mapped["AdminProfile | None"] = relationship(back_populates="admin_user", uselist=False)
     sessions: Mapped[list["AdminSession"]] = relationship(back_populates="admin_user", cascade="all, delete-orphan")
 
 
@@ -237,17 +236,6 @@ class UserInvitation(TimestampMixin, Base):
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
-
-
-class AdminProfile(TimestampMixin, Base):
-    __tablename__ = "admin_profiles"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    admin_user_id: Mapped[str] = mapped_column(ForeignKey("admin_users.id"), unique=True, index=True)
-    display_name: Mapped[str | None] = mapped_column(String(200))
-    email: Mapped[str | None] = mapped_column(String(200))
-
-    admin_user: Mapped["AdminUser"] = relationship(back_populates="profile")
 
 
 class AdminScope(Base):
@@ -297,8 +285,8 @@ class TenantLLMConfig(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), unique=True, index=True)
-    provider_type: Mapped[str] = mapped_column(String(100))
-    model_name: Mapped[str] = mapped_column(String(200))
+    provider_type: Mapped[str | None] = mapped_column(String(100))
+    model_name: Mapped[str | None] = mapped_column(String(200))
     endpoint_url: Mapped[str | None] = mapped_column(String(500))
     api_key_masked: Mapped[str | None] = mapped_column(String(32))
     secret_reference: Mapped[str | None] = mapped_column(String(255))

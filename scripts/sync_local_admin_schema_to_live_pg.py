@@ -19,7 +19,6 @@ TABLES_IN_INSERT_ORDER = [
     "tenant_onboarding_status",
     "tenant_llm_config",
     "admin_users",
-    "admin_profiles",
     "admin_permissions",
     "admin_scopes",
     "groups",
