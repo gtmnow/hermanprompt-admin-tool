@@ -3,16 +3,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Tenant, TenantOnboardingStatus
+from app.models import TenantOnboardingStatus
 from app.schemas import ListEnvelope, ResourceEnvelope, TenantOnboardingStatus as TenantOnboardingStatusSchema
 from app.security import Principal, require_permission
-from app.services import (
-    ensure_scope_access,
-    get_tenant_or_404,
-    onboarding_status_schema_compatible,
-    refresh_onboarding_state,
-    table_exists,
-)
+from app.services import ensure_scope_access, get_tenant_or_404, refresh_onboarding_state, table_exists
 
 router = APIRouter()
 
@@ -26,13 +20,8 @@ def list_onboarding_statuses(
         return ListEnvelope[TenantOnboardingStatusSchema](items=[], page=1, page_size=1, total_count=0, filters={})
 
     items = []
-    if onboarding_status_schema_compatible(db):
-        tenant_ids = [onboarding.tenant_id for onboarding in db.scalars(select(TenantOnboardingStatus).order_by(TenantOnboardingStatus.updated_at.desc()))]
-    else:
-        tenant_ids = [tenant.id for tenant in db.scalars(select(Tenant).order_by(Tenant.updated_at.desc()))]
-
-    for tenant_id in tenant_ids:
-        tenant = get_tenant_or_404(db, tenant_id)
+    for onboarding in db.scalars(select(TenantOnboardingStatus).order_by(TenantOnboardingStatus.updated_at.desc())):
+        tenant = get_tenant_or_404(db, onboarding.tenant_id)
         try:
             ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
         except HTTPException as exc:

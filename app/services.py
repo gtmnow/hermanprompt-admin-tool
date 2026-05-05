@@ -6,7 +6,6 @@ import hmac
 import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -397,96 +396,6 @@ def column_exists(db: Session, table_name: str, column_name: str) -> bool:
     except Exception:
         return False
     return any(column.get("name") == column_name for column in columns)
-
-
-def onboarding_status_schema_compatible(db: Session) -> bool:
-    if not table_exists(db, "tenant_onboarding_status"):
-        return False
-    required_columns = (
-        "tenant_id",
-        "tenant_created",
-        "llm_configured",
-        "llm_validated",
-        "groups_created",
-        "users_uploaded",
-        "admin_assigned",
-        "knowledge_configured",
-        "knowledge_ready",
-        "first_login_detected",
-        "first_transform_detected",
-        "first_score_detected",
-        "onboarding_status",
-        "updated_at",
-    )
-    return all(column_exists(db, "tenant_onboarding_status", column_name) for column_name in required_columns)
-
-
-def _build_onboarding_status_snapshot(
-    db: Session,
-    tenant_id: str,
-    *,
-    persisted: TenantOnboardingStatus | None = None,
-) -> TenantOnboardingStatus | SimpleNamespace:
-    tenant = get_tenant_or_404(db, tenant_id)
-    snapshot = persisted or SimpleNamespace(tenant_id=tenant_id, updated_at=datetime.now(timezone.utc))
-
-    llm_config = db.scalar(select(TenantLLMConfig).where(TenantLLMConfig.tenant_id == tenant_id))
-    group_count = db.scalar(select(func.count()).select_from(Group).where(Group.tenant_id == tenant_id)) or 0
-    user_count = (
-        db.scalar(select(func.count()).select_from(UserTenantMembership).where(UserTenantMembership.tenant_id == tenant_id))
-        or 0
-    )
-    snapshot_metrics = get_snapshot_tenant_metrics(db, tenant)
-    if snapshot_metrics and user_count == 0:
-        user_count = int(snapshot_metrics["user_count"])
-    admin_count = db.scalar(select(func.count()).select_from(AdminScope).where(AdminScope.tenant_id == tenant_id)) or 0
-
-    snapshot.tenant_created = True
-    snapshot.llm_configured = llm_config is not None
-    snapshot.llm_validated = bool(llm_config and llm_config.credential_status == "valid")
-    snapshot.groups_created = group_count > 0
-    snapshot.users_uploaded = user_count > 0
-    snapshot.admin_assigned = admin_count > 0
-    if not hasattr(snapshot, "first_login_detected"):
-        snapshot.first_login_detected = False
-    if not hasattr(snapshot, "first_transform_detected"):
-        snapshot.first_transform_detected = False
-    if not hasattr(snapshot, "first_score_detected"):
-        snapshot.first_score_detected = False
-    try:
-        knowledge_counts = db.execute(
-            text(
-                """
-                select
-                  count(*) as total_docs,
-                  count(*) filter (where status = 'ready') as ready_docs
-                from rag_documents
-                where tenant_id = :tenant_id and scope_type = 'tenant'
-                """
-            ),
-            {"tenant_id": tenant_id},
-        ).mappings().first()
-    except Exception:
-        knowledge_counts = None
-    snapshot.knowledge_configured = bool((knowledge_counts or {}).get("total_docs", 0))
-    snapshot.knowledge_ready = bool((knowledge_counts or {}).get("ready_docs", 0))
-
-    readiness = [
-        snapshot.llm_configured,
-        snapshot.llm_validated,
-        snapshot.admin_assigned,
-        snapshot.users_uploaded,
-    ]
-    if all(readiness):
-        snapshot.onboarding_status = "ready" if tenant.status != "active" else "live"
-    elif any(readiness):
-        snapshot.onboarding_status = "in_progress"
-    else:
-        snapshot.onboarding_status = "draft"
-
-    if persisted is not None:
-        return persisted
-    return snapshot
 
 
 def has_auth_user_credentials_table(db: Session) -> bool:
@@ -2313,15 +2222,64 @@ def validate_reseller_capacity(
 
 
 def refresh_onboarding_state(db: Session, tenant_id: str) -> TenantOnboardingStatus:
-    if not onboarding_status_schema_compatible(db):
-        return _build_onboarding_status_snapshot(db, tenant_id)
-
     onboarding = db.scalar(select(TenantOnboardingStatus).where(TenantOnboardingStatus.tenant_id == tenant_id))
+    tenant = get_tenant_or_404(db, tenant_id)
 
     if onboarding is None:
         onboarding = TenantOnboardingStatus(tenant_id=tenant_id, tenant_created=True)
         db.add(onboarding)
-    return _build_onboarding_status_snapshot(db, tenant_id, persisted=onboarding)
+
+    llm_config = db.scalar(select(TenantLLMConfig).where(TenantLLMConfig.tenant_id == tenant_id))
+    group_count = db.scalar(select(func.count()).select_from(Group).where(Group.tenant_id == tenant_id)) or 0
+    user_count = (
+        db.scalar(select(func.count()).select_from(UserTenantMembership).where(UserTenantMembership.tenant_id == tenant_id))
+        or 0
+    )
+    snapshot_metrics = get_snapshot_tenant_metrics(db, tenant)
+    if snapshot_metrics and user_count == 0:
+        user_count = int(snapshot_metrics["user_count"])
+    admin_count = (
+        db.scalar(select(func.count()).select_from(AdminScope).where(AdminScope.tenant_id == tenant_id)) or 0
+    )
+
+    onboarding.tenant_created = True
+    onboarding.llm_configured = llm_config is not None
+    onboarding.llm_validated = bool(llm_config and llm_config.credential_status == "valid")
+    onboarding.groups_created = group_count > 0
+    onboarding.users_uploaded = user_count > 0
+    onboarding.admin_assigned = admin_count > 0
+    try:
+        knowledge_counts = db.execute(
+            text(
+                """
+                select
+                  count(*) as total_docs,
+                  count(*) filter (where status = 'ready') as ready_docs
+                from rag_documents
+                where tenant_id = :tenant_id and scope_type = 'tenant'
+                """
+            ),
+            {"tenant_id": tenant_id},
+        ).mappings().first()
+    except Exception:
+        knowledge_counts = None
+    onboarding.knowledge_configured = bool((knowledge_counts or {}).get("total_docs", 0))
+    onboarding.knowledge_ready = bool((knowledge_counts or {}).get("ready_docs", 0))
+
+    readiness = [
+        onboarding.llm_configured,
+        onboarding.llm_validated,
+        onboarding.admin_assigned,
+        onboarding.users_uploaded,
+    ]
+    if all(readiness):
+        onboarding.onboarding_status = "ready" if tenant.status != "active" else "live"
+    elif any(readiness):
+        onboarding.onboarding_status = "in_progress"
+    else:
+        onboarding.onboarding_status = "draft"
+
+    return onboarding
 
 
 def revoke_tenant_invitations(db: Session, tenant_id: str) -> None:
