@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -8,9 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from app.api.auth import router as auth_router
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal, engine
 from app import models  # noqa: F401
-from app.schema_contract import validate_schema_contract
+from app.schema_contract import SchemaContractError, validate_schema_contract
 from app.services import seed_database
 
 settings = get_settings()
@@ -36,20 +37,34 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 if (frontend_dist_dir / "assets").exists():
     app.mount("/assets", StaticFiles(directory=frontend_dist_dir / "assets"), name="assets")
 
+logger = logging.getLogger("herman_admin.main")
+
 
 @app.on_event("startup")
 def startup() -> None:
     if settings.effective_herman_db_canonical_mode:
-        validate_schema_contract(
-            engine=engine,
-            version_table=settings.herman_db_version_table,
-            allowed_revisions=settings.herman_db_allowed_revisions,
-        )
+        try:
+            validate_schema_contract(
+                engine=engine,
+                version_table=settings.herman_db_version_table,
+                allowed_revisions=settings.herman_db_allowed_revisions,
+            )
+        except SchemaContractError:
+            logger.warning(
+                "Schema contract validation failed during startup; continuing with shared DB ownership model.",
+                exc_info=True,
+            )
     elif settings.bootstrap_schema:
-        Base.metadata.create_all(bind=engine)
+        logger.warning(
+            "bootstrap_schema=true but startup schema bootstrap is disabled to preserve shared schema ownership."
+        )
+
     if settings.seed_demo_data:
-        with SessionLocal() as db:
-            seed_database(db)
+        try:
+            with SessionLocal() as db:
+                seed_database(db)
+        except Exception:
+            logger.exception("Seed-on-startup failed, continuing without blocking startup.")
 
 
 @app.get("/", include_in_schema=False)

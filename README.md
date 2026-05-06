@@ -39,7 +39,7 @@ The current branch-level build supports the use-case foundation for `1.1` throug
   - system overview
   - audit log
 - Shared Pydantic schemas for envelopes, domain resources, runtime config, reporting, admin scope data, and service tiers
-- Environment-aware startup initialization with optional schema bootstrap and optional demo seeding
+- Environment-aware startup initialization with optional demo seeding (schema bootstrap is intentionally disabled at runtime; schema changes are managed by the shared herman-db migration pipeline).
 
 ## Current assumptions
 
@@ -55,7 +55,7 @@ The current branch-level build supports the use-case foundation for `1.1` throug
 - For local development, the vault uses `HERMAN_ADMIN_SECRET_VAULT_MASTER_KEY` when provided, or falls back to a local file-backed key at `HERMAN_ADMIN_SECRET_VAULT_LOCAL_KEY_PATH`.
 - Azure Key Vault is still the intended production-facing model, and the current config surface already includes `HERMAN_ADMIN_SECRET_VAULT_PROVIDER` and `HERMAN_ADMIN_AZURE_KEY_VAULT_URL` for that migration path.
 - Reporting is operationally useful but still uses derived backend metrics rather than finalized production analytics rollups.
-- When pointing at a live shared database, set `HERMAN_ADMIN_BOOTSTRAP_SCHEMA=false` and `HERMAN_ADMIN_SEED_DEMO_DATA=false`.
+- When pointing at a live shared database, set `HERMAN_ADMIN_SEED_DEMO_DATA=false`. `HERMAN_ADMIN_BOOTSTRAP_SCHEMA` is intentionally ignored at runtime; schema ownership stays with the shared herman-db migration pipeline.
 
 ## Primary screens and routes
 
