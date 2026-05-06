@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from urllib import error, request
 from urllib.parse import quote
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -36,6 +36,11 @@ def build_invite_url(raw_token: str, tenant: Tenant) -> str:
     return f"{base_url}?token={quote(raw_token)}&tenant={tenant_hint}"
 
 
+def invitations_have_current_flag(db: Session) -> bool:
+    columns = inspect(db.get_bind()).get_columns("user_invitations")
+    return any(column["name"] == "is_current" for column in columns)
+
+
 def expire_stale_invitations(db: Session, *, membership: UserTenantMembership) -> None:
     now = utc_now()
     stale_invitations = list(
@@ -62,6 +67,7 @@ def revoke_active_invitations(
 ) -> None:
     expire_stale_invitations(db, membership=membership)
     revoke_time = revoked_at or utc_now()
+    has_current_flag = invitations_have_current_flag(db)
     active_invitations = list(
         db.scalars(
             select(UserInvitation).where(
@@ -76,6 +82,8 @@ def revoke_active_invitations(
     for invitation in active_invitations:
         invitation.status = "revoked"
         invitation.revoked_at = revoke_time
+        if has_current_flag:
+            invitation.is_current = False
 
 
 def create_or_replace_invitation(
@@ -88,6 +96,7 @@ def create_or_replace_invitation(
 ) -> tuple[UserInvitation, str]:
     settings = get_settings()
     revoke_active_invitations(db, membership=membership)
+    has_current_flag = invitations_have_current_flag(db)
 
     raw_token = build_invite_token()
     invitation = UserInvitation(
@@ -100,6 +109,7 @@ def create_or_replace_invitation(
         provider="resend",
         created_by_admin_user_id=created_by_admin_user_id,
         expires_at=utc_now() + timedelta(days=settings.invite_expiry_days),
+        is_current=True if has_current_flag else getattr(UserInvitation, "is_current", True),
     )
     db.add(invitation)
     db.flush()

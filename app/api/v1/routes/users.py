@@ -40,6 +40,7 @@ from app.services import (
     serialize_model,
     sync_auth_user_primary_tenant,
     get_user_detail_sections,
+    column_exists,
     table_exists,
     upsert_auth_user,
     upsert_user_membership_profile,
@@ -144,16 +145,13 @@ def resolved_avg_improvement_pct(
 def latest_invitation_for_user(db: Session, user_id_hash: str, tenant_id: str) -> UserInvitation | None:
     if not table_exists(db, "user_invitations"):
         return None
-    invitations = list(
-        db.scalars(
-            select(UserInvitation)
-            .where(
-                UserInvitation.user_id_hash == user_id_hash,
-                UserInvitation.tenant_id == tenant_id,
-            )
-            .order_by(UserInvitation.created_at.desc())
-        )
+    query = select(UserInvitation).where(
+        UserInvitation.user_id_hash == user_id_hash,
+        UserInvitation.tenant_id == tenant_id,
     )
+    if column_exists(db, "user_invitations", "is_current"):
+        query = query.where(UserInvitation.is_current.is_(True))
+    invitations = list(db.scalars(query.order_by(UserInvitation.created_at.desc())))
     return invitations[0] if invitations else None
 
 
