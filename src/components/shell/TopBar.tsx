@@ -22,11 +22,13 @@ export function TopBar() {
   const displayName = profile?.display_name || session?.principal.user_id_hash || "Admin User";
   const email = profile?.email || session?.principal.user_id_hash || "Authenticated Admin";
   const roleLabel = titleCase(session?.principal.role || "admin");
-  const selectedLabel = hasMultipleVisibleTenants
-    ? selectedTenantId
-      ? visibleTenants.find((tenant) => tenant.tenant.id === selectedTenantId)?.tenant.tenant_name ?? "Select organization"
-      : "All orgs"
-    : visibleTenants[0]?.tenant.tenant_name ?? "No organizations";
+  const selectedLabel = isLoading
+    ? "Loading organizations..."
+    : hasMultipleVisibleTenants
+      ? selectedTenantId
+        ? visibleTenants.find((tenant) => tenant.tenant.id === selectedTenantId)?.tenant.tenant_name ?? "Select organization"
+        : "All organizations"
+      : visibleTenants[0]?.tenant.tenant_name ?? "All organizations";
 
   return (
     <header className="topbar">
@@ -47,7 +49,7 @@ export function TopBar() {
           value={selectedTenantId ?? "all"}
           onChange={(event) => setSelectedTenantId(event.target.value === "all" ? null : event.target.value)}
         >
-          {hasMultipleVisibleTenants ? <option value="all">All orgs</option> : null}
+          {hasMultipleVisibleTenants ? <option value="all">All organizations</option> : null}
           {visibleTenants.map((tenant) => (
             <option key={tenant.tenant.id} value={tenant.tenant.id}>
               {tenant.tenant.tenant_name}

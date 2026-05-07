@@ -39,13 +39,13 @@ export function ReportsPage() {
   const resellersQuery = useQuery({
     queryKey: ["reports-page-resellers"],
     queryFn: () => tenantApi.listResellers(),
-    enabled: !scopeLoading,
+    enabled: !scopeLoading && scopeType === "reseller",
   });
 
   const groupsQuery = useQuery({
     queryKey: ["reports-page-groups", organizationId || "all"],
     queryFn: () => tenantApi.getGroups(organizationId || undefined),
-    enabled: !scopeLoading,
+    enabled: !scopeLoading && scopeType === "group",
   });
 
   useEffect(() => {
@@ -136,7 +136,7 @@ export function ReportsPage() {
     },
   });
 
-  if (scopeLoading || groupsQuery.isLoading || resellersQuery.isLoading) {
+  if (scopeLoading) {
     return <LoadingBlock label="Loading reporting workspace..." />;
   }
 
@@ -197,6 +197,12 @@ export function ReportsPage() {
 
         {reportQuery.error ? (
           <div className="section-note section-note--danger">{mutationMessage(reportQuery.error)}</div>
+        ) : null}
+        {groupsQuery.error ? (
+          <div className="section-note section-note--danger">{mutationMessage(groupsQuery.error)}</div>
+        ) : null}
+        {resellersQuery.error ? (
+          <div className="section-note section-note--danger">{mutationMessage(resellersQuery.error)}</div>
         ) : null}
         {exportMutation.error ? (
           <div className="section-note section-note--danger">{mutationMessage(exportMutation.error)}</div>

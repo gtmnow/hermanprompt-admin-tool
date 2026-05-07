@@ -1,5 +1,5 @@
 import { api } from "../../lib/api";
-import type { ReportSummary, SystemOverview, TenantSummary } from "../../lib/types";
+import type { ReportSummary, SystemOverview } from "../../lib/types";
 
 export type DashboardRangeKey = "24h" | "7d" | "30d" | "ytd" | "all";
 
@@ -48,9 +48,8 @@ export async function getDashboardData(
   const reportScopeId = selectedTenantId ?? resellerPartnerId ?? "global";
   const window = getRangeWindow(rangeKey);
 
-  const [systemOverview, tenants, report] = await Promise.all([
+  const [systemOverview, report] = await Promise.all([
     api.getResource<SystemOverview>("/system/overview").catch(() => null),
-    api.getList<TenantSummary>("/tenants"),
     api.postResource<ReportSummary>("/reports/run", {
       report_type: "system overview",
       dimension: reportDimension,
@@ -64,7 +63,6 @@ export async function getDashboardData(
 
   return {
     systemOverview: systemOverview?.resource ?? null,
-    tenants: tenants.items,
     report: report.resource,
   };
 }

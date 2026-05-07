@@ -35,13 +35,13 @@ export function ExportsPage() {
   const groupsQuery = useQuery({
     queryKey: ["exports-page-groups", organizationId || "all"],
     queryFn: () => tenantApi.getGroups(organizationId || undefined),
-    enabled: !scopeLoading,
+    enabled: !scopeLoading && scopeType === "group",
   });
 
   const resellersQuery = useQuery({
     queryKey: ["exports-page-resellers"],
     queryFn: () => tenantApi.listResellers(),
-    enabled: !scopeLoading,
+    enabled: !scopeLoading && scopeType === "reseller",
   });
 
   const exportsQuery = useQuery({
@@ -124,7 +124,7 @@ export function ExportsPage() {
     },
   });
 
-  if (scopeLoading || groupsQuery.isLoading || resellersQuery.isLoading || exportsQuery.isLoading) {
+  if (scopeLoading || exportsQuery.isLoading) {
     return <LoadingBlock label="Loading exports..." />;
   }
 
@@ -154,6 +154,12 @@ export function ExportsPage() {
 
           {exportMutation.error ? (
             <div className="section-note section-note--danger">{mutationMessage(exportMutation.error)}</div>
+          ) : null}
+          {groupsQuery.error ? (
+            <div className="section-note section-note--danger">{mutationMessage(groupsQuery.error)}</div>
+          ) : null}
+          {resellersQuery.error ? (
+            <div className="section-note section-note--danger">{mutationMessage(resellersQuery.error)}</div>
           ) : null}
           {exportMutation.data?.resource ? (
             <div className="section-note section-note--success">

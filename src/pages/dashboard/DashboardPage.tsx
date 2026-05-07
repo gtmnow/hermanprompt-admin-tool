@@ -44,16 +44,12 @@ export function DashboardPage() {
   });
 
   const scopedTenants = useMemo(() => {
-    if (!dashboardQuery.data) {
-      return [];
-    }
-
     if (!effectiveTenantId) {
-      return dashboardQuery.data.tenants;
+      return visibleTenants;
     }
 
-    return dashboardQuery.data.tenants.filter((tenant) => tenant.tenant.id === effectiveTenantId);
-  }, [dashboardQuery.data, effectiveTenantId]);
+    return visibleTenants.filter((tenant) => tenant.tenant.id === effectiveTenantId);
+  }, [effectiveTenantId, visibleTenants]);
 
   const scopedOnboarding = useMemo(() => {
     if (!onboardingQuery.data) {
@@ -68,7 +64,7 @@ export function DashboardPage() {
   }, [effectiveTenantId, onboardingQuery.data]);
 
   const alerts = useMemo(() => {
-    if (!dashboardQuery.data) {
+    if (!dashboardQuery.data && !visibleTenants.length) {
       return [];
     }
 
@@ -89,7 +85,7 @@ export function DashboardPage() {
         href: "/activation",
       },
     ];
-  }, [dashboardQuery.data, scopedOnboarding, scopedTenants]);
+  }, [dashboardQuery.data, scopedOnboarding, scopedTenants, visibleTenants.length]);
 
   if (scopeIsLoading || dashboardQuery.isLoading) {
     return <LoadingBlock label="Loading dashboard summary..." />;
