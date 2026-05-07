@@ -11,6 +11,7 @@ import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { MultiTrendChart } from "../../components/charts/MultiTrendChart";
 import { SimpleTrendChart } from "../../components/charts/SimpleTrendChart";
 import { StatusBadge } from "../../components/status/StatusBadge";
+import { tenantApi } from "../../features/tenants/api";
 import {
   DASHBOARD_RANGE_OPTIONS,
   type DashboardRangeKey,
@@ -36,6 +37,11 @@ export function DashboardPage() {
     queryFn: () => getDashboardData(effectiveTenantId ?? undefined, rangeKey, resellerScopeId ?? undefined),
     enabled: !scopeIsLoading,
   });
+  const onboardingQuery = useQuery({
+    queryKey: ["dashboard-onboarding", effectiveTenantId ?? resellerScopeId ?? "all"],
+    queryFn: () => tenantApi.listOnboarding(),
+    enabled: !scopeIsLoading,
+  });
 
   const scopedTenants = useMemo(() => {
     if (!dashboardQuery.data) {
@@ -50,16 +56,16 @@ export function DashboardPage() {
   }, [dashboardQuery.data, effectiveTenantId]);
 
   const scopedOnboarding = useMemo(() => {
-    if (!dashboardQuery.data) {
+    if (!onboardingQuery.data) {
       return [];
     }
 
     if (!effectiveTenantId) {
-      return dashboardQuery.data.onboarding;
+      return onboardingQuery.data.items;
     }
 
-    return dashboardQuery.data.onboarding.filter((item) => item.tenant_id === effectiveTenantId);
-  }, [dashboardQuery.data, effectiveTenantId]);
+    return onboardingQuery.data.items.filter((item) => item.tenant_id === effectiveTenantId);
+  }, [effectiveTenantId, onboardingQuery.data]);
 
   const alerts = useMemo(() => {
     if (!dashboardQuery.data) {
