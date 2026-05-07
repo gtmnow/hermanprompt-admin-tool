@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Building2, CircleAlert, Rocket, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { useAuth } from "../../app/providers/AuthProvider";
 import { useOrganizationScope } from "../../app/providers/OrganizationScopeProvider";
 import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
@@ -21,13 +22,18 @@ const GPT_55_INPUT_COST_PER_TOKEN = 5 / 1_000_000;
 const GPT_55_OUTPUT_COST_PER_TOKEN = 30 / 1_000_000;
 
 export function DashboardPage() {
+  const { session } = useAuth();
   const { isLoading: scopeIsLoading, selectedTenant, selectedTenantId, visibleTenants } = useOrganizationScope();
   const [rangeKey, setRangeKey] = useState<DashboardRangeKey>("30d");
   const effectiveTenantId = selectedTenantId ?? (visibleTenants.length === 1 ? visibleTenants[0]?.tenant.id ?? null : null);
   const effectiveTenant = selectedTenant ?? (visibleTenants.length === 1 ? visibleTenants[0] ?? null : null);
+  const resellerScopeId =
+    effectiveTenantId
+      ? null
+      : session?.principal.scopes.find((scope) => scope.scope_type === "reseller" && scope.reseller_partner_id)?.reseller_partner_id ?? null;
   const dashboardQuery = useQuery({
-    queryKey: ["dashboard", effectiveTenantId ?? "all", rangeKey],
-    queryFn: () => getDashboardData(effectiveTenantId ?? undefined, rangeKey),
+    queryKey: ["dashboard", effectiveTenantId ?? resellerScopeId ?? "all", rangeKey],
+    queryFn: () => getDashboardData(effectiveTenantId ?? undefined, rangeKey, resellerScopeId ?? undefined),
     enabled: !scopeIsLoading,
   });
 
@@ -91,7 +97,13 @@ export function DashboardPage() {
   const activeUsersKpi = report.kpis.find((item) => item.label === "Active Users")?.value ?? systemOverview?.active_user_count ?? 0;
   const averageImprovementKpi = report.kpis.find((item) => item.label === "Average Improvement")?.value ?? "N/A";
   const sessionCount = Number(report.tables.find((item) => item.metric === "session_count")?.value ?? 0);
-  const selectedScopeLabel = effectiveTenant?.tenant.tenant_name ?? "all visible organizations";
+  const isPartnerPortfolioScope = !effectiveTenant && Boolean(resellerScopeId);
+  const selectedScopeLabel = effectiveTenant?.tenant.tenant_name ?? (isPartnerPortfolioScope ? "your partner portfolio" : "all visible organizations");
+  const activeUsersScopeLabel = effectiveTenant
+    ? `Within ${effectiveTenant.tenant.tenant_name}`
+    : isPartnerPortfolioScope
+      ? "Across your partner portfolio"
+      : "Across all visible organizations";
   const selectedRangeLabel = getRangeLabel(rangeKey);
   const usageTrend = report.charts.find((chart) => chart.label === "Usage Trend")?.points ?? [];
   const improvementTrend = report.charts.find((chart) => chart.label === "Improvement Trend")?.points ?? [];
@@ -152,7 +164,7 @@ export function DashboardPage() {
           <div className="metric-card__label">Active Users</div>
           <div className="metric-card__value">{activeUsersKpi}</div>
           <div className="metric-card__trend">
-            {effectiveTenant ? `Within ${effectiveTenant.tenant.tenant_name}` : "Across all visible organizations"}
+            {activeUsersScopeLabel}
           </div>
         </div>
         <div className="card metric-card">

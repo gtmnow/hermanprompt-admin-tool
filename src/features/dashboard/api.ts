@@ -39,9 +39,13 @@ export function getRangeLabel(rangeKey: DashboardRangeKey) {
   return DASHBOARD_RANGE_OPTIONS.find((option) => option.key === rangeKey)?.label ?? "Last 30 days";
 }
 
-export async function getDashboardData(selectedTenantId?: string, rangeKey: DashboardRangeKey = "30d") {
-  const reportDimension = selectedTenantId ? "organization" : "global";
-  const reportScopeId = selectedTenantId ?? "global";
+export async function getDashboardData(
+  selectedTenantId?: string,
+  rangeKey: DashboardRangeKey = "30d",
+  resellerPartnerId?: string,
+) {
+  const reportDimension = selectedTenantId ? "organization" : resellerPartnerId ? "reseller" : "global";
+  const reportScopeId = selectedTenantId ?? resellerPartnerId ?? "global";
   const window = getRangeWindow(rangeKey);
 
   const [systemOverview, tenants, onboarding, report] = await Promise.all([
