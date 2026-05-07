@@ -2,6 +2,7 @@ import { api } from "../../lib/api";
 import type { ReportSummary, SystemOverview } from "../../lib/types";
 
 export type DashboardRangeKey = "24h" | "7d" | "30d" | "ytd" | "all";
+export type DashboardScopeDimension = "organization" | "group" | "reseller" | "global";
 
 export const DASHBOARD_RANGE_OPTIONS: Array<{ key: DashboardRangeKey; label: string; shortLabel: string }> = [
   { key: "24h", label: "Last 24 hours", shortLabel: "1D" },
@@ -40,20 +41,17 @@ export function getRangeLabel(rangeKey: DashboardRangeKey) {
 }
 
 export async function getDashboardData(
-  selectedTenantId?: string,
+  scope: { dimension: DashboardScopeDimension; scopeId: string },
   rangeKey: DashboardRangeKey = "30d",
-  resellerPartnerId?: string,
 ) {
-  const reportDimension = selectedTenantId ? "organization" : resellerPartnerId ? "reseller" : "global";
-  const reportScopeId = selectedTenantId ?? resellerPartnerId ?? "global";
   const window = getRangeWindow(rangeKey);
 
   const [systemOverview, report] = await Promise.all([
     api.getResource<SystemOverview>("/system/overview").catch(() => null),
     api.postResource<ReportSummary>("/reports/run", {
       report_type: "system overview",
-      dimension: reportDimension,
-      scope_id: reportScopeId,
+      dimension: scope.dimension,
+      scope_id: scope.scopeId,
       filters: {},
       start_date: window.start,
       end_date: window.end,

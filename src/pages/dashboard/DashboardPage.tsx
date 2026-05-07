@@ -15,53 +15,135 @@ import { tenantApi } from "../../features/tenants/api";
 import {
   DASHBOARD_RANGE_OPTIONS,
   type DashboardRangeKey,
+  type DashboardScopeDimension,
   getDashboardData,
   getRangeLabel,
 } from "../../features/dashboard/api";
+import type { AuthenticatedAdminPrincipal } from "../../lib/types";
 
 const GPT_55_INPUT_COST_PER_TOKEN = 5 / 1_000_000;
 const GPT_55_OUTPUT_COST_PER_TOKEN = 30 / 1_000_000;
+
+type ResolvedDashboardScope = {
+  dimension: DashboardScopeDimension;
+  scopeId: string;
+  selectedScopeLabel: string;
+  activeUsersScopeLabel: string;
+  effectiveTenantId: string | null;
+  usesTenantList: boolean;
+};
+
+function resolveDashboardScope(
+  principal: AuthenticatedAdminPrincipal | undefined,
+  selectedTenantId: string | null,
+  visibleTenants: ReturnType<typeof useOrganizationScope>["visibleTenants"],
+): ResolvedDashboardScope {
+  const selectedTenant = visibleTenants.find((tenant) => tenant.tenant.id === selectedTenantId) ?? null;
+  const singleVisibleTenant = visibleTenants.length === 1 ? visibleTenants[0] ?? null : null;
+  const effectiveTenant = selectedTenant ?? singleVisibleTenant;
+
+  if (effectiveTenant) {
+    return {
+      dimension: "organization",
+      scopeId: effectiveTenant.tenant.id,
+      selectedScopeLabel: effectiveTenant.tenant.tenant_name,
+      activeUsersScopeLabel: `Within ${effectiveTenant.tenant.tenant_name}`,
+      effectiveTenantId: effectiveTenant.tenant.id,
+      usesTenantList: true,
+    };
+  }
+
+  const scopes = principal?.scopes ?? [];
+  const groupScope = scopes.find((scope) => scope.scope_type === "group" && scope.group_id);
+  if (groupScope?.group_id) {
+    return {
+      dimension: "group",
+      scopeId: groupScope.group_id,
+      selectedScopeLabel: "your assigned group",
+      activeUsersScopeLabel: "Within your assigned group",
+      effectiveTenantId: groupScope.tenant_id,
+      usesTenantList: false,
+    };
+  }
+
+  const tenantScope = scopes.find((scope) => scope.scope_type === "tenant" && scope.tenant_id);
+  if (tenantScope?.tenant_id) {
+    return {
+      dimension: "organization",
+      scopeId: tenantScope.tenant_id,
+      selectedScopeLabel: "your assigned organization",
+      activeUsersScopeLabel: "Within your assigned organization",
+      effectiveTenantId: tenantScope.tenant_id,
+      usesTenantList: false,
+    };
+  }
+
+  const resellerScope = scopes.find((scope) => scope.scope_type === "reseller" && scope.reseller_partner_id);
+  if (resellerScope?.reseller_partner_id) {
+    return {
+      dimension: "reseller",
+      scopeId: resellerScope.reseller_partner_id,
+      selectedScopeLabel: "your partner portfolio",
+      activeUsersScopeLabel: "Across your partner portfolio",
+      effectiveTenantId: null,
+      usesTenantList: visibleTenants.length > 0,
+    };
+  }
+
+  return {
+    dimension: "global",
+    scopeId: "global",
+    selectedScopeLabel: visibleTenants.length > 0 ? "all visible organizations" : "your admin scope",
+    activeUsersScopeLabel: visibleTenants.length > 0 ? "Across all visible organizations" : "Across your admin scope",
+    effectiveTenantId: null,
+    usesTenantList: visibleTenants.length > 0,
+  };
+}
 
 export function DashboardPage() {
   const { session } = useAuth();
   const { isLoading: scopeIsLoading, selectedTenant, selectedTenantId, visibleTenants } = useOrganizationScope();
   const [rangeKey, setRangeKey] = useState<DashboardRangeKey>("30d");
-  const effectiveTenantId = selectedTenantId ?? (visibleTenants.length === 1 ? visibleTenants[0]?.tenant.id ?? null : null);
+  const canReadTenants = session?.principal.permissions.includes("tenants.read") ?? false;
+  const dashboardScope = useMemo(
+    () => resolveDashboardScope(session?.principal, selectedTenantId, visibleTenants),
+    [selectedTenantId, session?.principal, visibleTenants],
+  );
   const effectiveTenant = selectedTenant ?? (visibleTenants.length === 1 ? visibleTenants[0] ?? null : null);
-  const resellerScopeId =
-    effectiveTenantId
-      ? null
-      : session?.principal.scopes.find((scope) => scope.scope_type === "reseller" && scope.reseller_partner_id)?.reseller_partner_id ?? null;
   const dashboardQuery = useQuery({
-    queryKey: ["dashboard", effectiveTenantId ?? resellerScopeId ?? "all", rangeKey],
-    queryFn: () => getDashboardData(effectiveTenantId ?? undefined, rangeKey, resellerScopeId ?? undefined),
+    queryKey: ["dashboard", dashboardScope.dimension, dashboardScope.scopeId, rangeKey],
+    queryFn: () => getDashboardData({ dimension: dashboardScope.dimension, scopeId: dashboardScope.scopeId }, rangeKey),
     enabled: !scopeIsLoading,
   });
   const onboardingQuery = useQuery({
-    queryKey: ["dashboard-onboarding", effectiveTenantId ?? resellerScopeId ?? "all"],
+    queryKey: ["dashboard-onboarding", dashboardScope.effectiveTenantId ?? dashboardScope.scopeId],
     queryFn: () => tenantApi.listOnboarding(),
-    enabled: !scopeIsLoading,
+    enabled: !scopeIsLoading && canReadTenants,
   });
 
   const scopedTenants = useMemo(() => {
-    if (!effectiveTenantId) {
+    if (!dashboardScope.usesTenantList) {
+      return [];
+    }
+
+    if (!dashboardScope.effectiveTenantId) {
       return visibleTenants;
     }
 
-    return visibleTenants.filter((tenant) => tenant.tenant.id === effectiveTenantId);
-  }, [effectiveTenantId, visibleTenants]);
+    return visibleTenants.filter((tenant) => tenant.tenant.id === dashboardScope.effectiveTenantId);
+  }, [dashboardScope.effectiveTenantId, dashboardScope.usesTenantList, visibleTenants]);
 
   const scopedOnboarding = useMemo(() => {
     if (!onboardingQuery.data) {
       return [];
     }
 
-    if (!effectiveTenantId) {
+    if (!dashboardScope.effectiveTenantId) {
       return onboardingQuery.data.items;
     }
 
-    return onboardingQuery.data.items.filter((item) => item.tenant_id === effectiveTenantId);
-  }, [effectiveTenantId, onboardingQuery.data]);
+    return onboardingQuery.data.items.filter((item) => item.tenant_id === dashboardScope.effectiveTenantId);
+  }, [dashboardScope.effectiveTenantId, onboardingQuery.data]);
 
   const alerts = useMemo(() => {
     if (!dashboardQuery.data && !visibleTenants.length) {
@@ -91,6 +173,10 @@ export function DashboardPage() {
     return <LoadingBlock label="Loading dashboard summary..." />;
   }
 
+  if (dashboardQuery.error) {
+    return <div className="empty-state">Dashboard failed to load: {dashboardQuery.error.message}</div>;
+  }
+
   if (!dashboardQuery.data) {
     return <div className="empty-state">No dashboard data is available yet.</div>;
   }
@@ -99,13 +185,10 @@ export function DashboardPage() {
   const activeUsersKpi = report.kpis.find((item) => item.label === "Active Users")?.value ?? systemOverview?.active_user_count ?? 0;
   const averageImprovementKpi = report.kpis.find((item) => item.label === "Average Improvement")?.value ?? "N/A";
   const sessionCount = Number(report.tables.find((item) => item.metric === "session_count")?.value ?? 0);
-  const isPartnerPortfolioScope = !effectiveTenant && Boolean(resellerScopeId);
-  const selectedScopeLabel = effectiveTenant?.tenant.tenant_name ?? (isPartnerPortfolioScope ? "your partner portfolio" : "all visible organizations");
+  const selectedScopeLabel = effectiveTenant?.tenant.tenant_name ?? dashboardScope.selectedScopeLabel;
   const activeUsersScopeLabel = effectiveTenant
     ? `Within ${effectiveTenant.tenant.tenant_name}`
-    : isPartnerPortfolioScope
-      ? "Across your partner portfolio"
-      : "Across all visible organizations";
+    : dashboardScope.activeUsersScopeLabel;
   const selectedRangeLabel = getRangeLabel(rangeKey);
   const usageTrend = report.charts.find((chart) => chart.label === "Usage Trend")?.points ?? [];
   const improvementTrend = report.charts.find((chart) => chart.label === "Improvement Trend")?.points ?? [];

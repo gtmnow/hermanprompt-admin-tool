@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { tenantApi } from "../../features/tenants/api";
 import type { TenantSummary } from "../../lib/types";
+import { useAuth } from "./AuthProvider";
 
 type OrganizationScopeContextValue = {
   visibleTenants: TenantSummary[];
@@ -23,11 +24,14 @@ type OrganizationScopeContextValue = {
 const OrganizationScopeContext = createContext<OrganizationScopeContextValue | null>(null);
 
 export function OrganizationScopeProvider({ children }: PropsWithChildren) {
+  const { session } = useAuth();
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  const canReadTenants = session?.principal.permissions.includes("tenants.read") ?? false;
 
   const tenantsQuery = useQuery({
     queryKey: ["visible-tenants"],
     queryFn: () => tenantApi.listTenants(),
+    enabled: canReadTenants,
   });
 
   const visibleTenants = tenantsQuery.data?.items ?? [];
