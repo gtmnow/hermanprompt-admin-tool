@@ -13,6 +13,7 @@ type SimpleTrendChartProps = {
   color?: string;
   emptyMessage?: string;
   tooltipText?: string;
+  plotNullAsZero?: boolean;
 };
 
 function formatAxisBucket(bucket: string) {
@@ -43,8 +44,13 @@ export function SimpleTrendChart({
   color = "#00AEEF",
   emptyMessage = "Not enough scored sessions in this period to show a trend yet.",
   tooltipText,
+  plotNullAsZero = false,
 }: SimpleTrendChartProps) {
-  const populatedPointCount = data.filter((point) => point.value !== null).length;
+  const normalizedData = data.map((point) => ({
+    ...point,
+    value: plotNullAsZero && point.value === null ? 0 : point.value,
+  }));
+  const populatedPointCount = normalizedData.filter((point) => point.value !== null).length;
 
   return (
     <div className="panel">
@@ -60,7 +66,7 @@ export function SimpleTrendChart({
           <div className="empty-state chart-empty-state">{emptyMessage}</div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data}>
+            <LineChart data={normalizedData}>
               <CartesianGrid stroke="#E2E8F0" strokeDasharray="4 4" />
               <XAxis dataKey="bucket" tick={{ fill: "#64748B", fontSize: 12 }} tickFormatter={formatAxisBucket} />
               <YAxis tick={{ fill: "#64748B", fontSize: 12 }} />

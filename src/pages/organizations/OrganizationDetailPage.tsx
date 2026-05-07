@@ -254,6 +254,7 @@ export function OrganizationDetailPage() {
               subtitle="Average delta from initial to final prompt score"
               tooltipText="Shows how average improvement changes over the selected reporting period."
               data={improvementTrend}
+              plotNullAsZero
               emptyMessage="No scored sessions were found in this reporting window, so improvement is not plotted yet."
             />
           </div>

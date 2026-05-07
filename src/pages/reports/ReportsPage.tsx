@@ -364,6 +364,7 @@ export function ReportsPage() {
               subtitle="Average delta from initial to final prompt score"
               tooltipText="Shows whether prompt improvement is increasing or decreasing over the selected window."
               data={improvementTrend}
+              plotNullAsZero
               emptyMessage="No scored sessions were found in this reporting window, so improvement is not plotted yet."
             />
           </div>

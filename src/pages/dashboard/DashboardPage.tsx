@@ -213,6 +213,7 @@ export function DashboardPage() {
           subtitle={`Average improvement from initial to final prompt score across ${selectedScopeLabel}`}
           tooltipText="Shows whether prompt quality improvement is rising, flattening, or falling over the selected period."
           data={improvementTrend}
+          plotNullAsZero
           emptyMessage="No scored sessions were found in this reporting window, so improvement is not plotted yet."
         />
       </div>
