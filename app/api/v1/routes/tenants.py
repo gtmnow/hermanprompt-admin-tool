@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
+from time import perf_counter
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
@@ -68,6 +70,7 @@ from app.services import (
 router = APIRouter()
 settings = get_settings()
 transformer_client = PromptTransformerClient()
+logger = logging.getLogger(__name__)
 
 
 class ActivationOverrideRequest(BaseModel):
@@ -271,8 +274,19 @@ def list_tenants(
     principal: Principal = Depends(require_permission("tenants.read")),
     db: Session = Depends(get_db),
 ) -> ListEnvelope[TenantSummary]:
+    started_at = perf_counter()
     if not table_exists(db, "tenants"):
         items = [snapshot_summary(db, snapshot_tenant_id) for snapshot_tenant_id in get_snapshot_tenant_ids(db)]
+        logger.info(
+            "tenants.list completed via snapshot fallback",
+            extra={
+                "context": {
+                    "role": principal.role,
+                    "count": len(items),
+                    "duration_ms": round((perf_counter() - started_at) * 1000, 1),
+                }
+            },
+        )
         return ListEnvelope[TenantSummary](
             items=items,
             page=1,
@@ -281,6 +295,7 @@ def list_tenants(
             filters={"status": status_filter, "reseller_partner_id": reseller_partner_id},
         )
 
+    query_started_at = perf_counter()
     query = select(Tenant).order_by(Tenant.created_at.desc())
     if status_filter:
         query = query.where(Tenant.status == status_filter)
@@ -302,8 +317,11 @@ def list_tenants(
         mapped_snapshot_ids.add(tenant.id)
         mapped_snapshot_ids.add(tenant.tenant_key)
 
+    query_duration_ms = round((perf_counter() - query_started_at) * 1000, 1)
+    summary_started_at = perf_counter()
     snapshot_metrics_by_tenant_id = get_snapshot_tenant_metrics_map(db, scoped_tenants)
     items = [to_summary(db, tenant, snapshot_metrics_by_tenant_id.get(tenant.id)) for tenant in scoped_tenants]
+    summary_duration_ms = round((perf_counter() - summary_started_at) * 1000, 1)
 
     if principal.role in {"super_admin", "support_admin"}:
         for snapshot_tenant_id in get_snapshot_tenant_ids(db):
@@ -313,6 +331,21 @@ def list_tenants(
 
     start = (page - 1) * page_size
     end = start + page_size
+    logger.info(
+        "tenants.list completed",
+        extra={
+            "context": {
+                "role": principal.role,
+                "scope_count": len(principal.scopes),
+                "requested_page_size": page_size,
+                "returned_count": len(items[start:end]),
+                "total_count": len(items),
+                "query_duration_ms": query_duration_ms,
+                "summary_duration_ms": summary_duration_ms,
+                "duration_ms": round((perf_counter() - started_at) * 1000, 1),
+            }
+        },
+    )
     return ListEnvelope[TenantSummary](
         items=items[start:end],
         page=page,

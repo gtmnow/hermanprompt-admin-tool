@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from time import perf_counter
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -27,6 +30,7 @@ from app.security import Principal, build_principal_for_admin, get_current_princ
 from app.services import resolve_admin_profile_summary
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _build_auth_response(db: Session, principal: Principal, session_id: str) -> AuthSessionResponse:
@@ -87,10 +91,23 @@ def get_current_admin_session(
     principal: Principal = Depends(get_current_principal),
     db: Session = Depends(get_db),
 ) -> AuthSessionResponse:
+    started_at = perf_counter()
     session_id = get_request_session_id(request, get_settings())
     if not session_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin session required")
-    return _build_auth_response(db, principal, session_id)
+    response = _build_auth_response(db, principal, session_id)
+    logger.info(
+        "auth.me completed",
+        extra={
+            "context": {
+                "admin_id": principal.admin_id,
+                "role": principal.role,
+                "scope_count": len(principal.scopes),
+                "duration_ms": round((perf_counter() - started_at) * 1000, 1),
+            }
+        },
+    )
+    return response
 
 
 @router.post("/logout", response_model=LogoutResponse)

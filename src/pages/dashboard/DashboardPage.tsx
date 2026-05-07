@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Building2, CircleAlert, Rocket, ShieldCheck } from "lucide-react";
@@ -19,6 +19,7 @@ import {
   getDashboardData,
   getRangeLabel,
 } from "../../features/dashboard/api";
+import { recordLoadTrace } from "../../lib/loadTrace";
 import type { AuthenticatedAdminPrincipal } from "../../lib/types";
 
 const GPT_55_INPUT_COST_PER_TOKEN = 5 / 1_000_000;
@@ -120,6 +121,47 @@ export function DashboardPage() {
     queryFn: () => tenantApi.listOnboarding(),
     enabled: canReadTenants && !scopeIsLoading,
   });
+
+  useEffect(() => {
+    recordLoadTrace("dashboard.query.state", {
+      rangeKey,
+      scopeDimension: dashboardScope.dimension,
+      scopeId: dashboardScope.scopeId,
+      scopeIsLoading,
+      dashboardIsLoading: dashboardQuery.isLoading,
+      dashboardIsFetching: dashboardQuery.isFetching,
+      dashboardHasData: Boolean(dashboardQuery.data),
+      dashboardError: dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null,
+      onboardingIsLoading: onboardingQuery.isLoading,
+      onboardingIsFetching: onboardingQuery.isFetching,
+      onboardingHasData: Boolean(onboardingQuery.data),
+      visibleTenantCount: visibleTenants.length,
+    });
+  }, [
+    dashboardQuery.data,
+    dashboardQuery.error,
+    dashboardQuery.isFetching,
+    dashboardQuery.isLoading,
+    dashboardScope.dimension,
+    dashboardScope.scopeId,
+    onboardingQuery.data,
+    onboardingQuery.isFetching,
+    onboardingQuery.isLoading,
+    rangeKey,
+    scopeIsLoading,
+    visibleTenants.length,
+  ]);
+
+  useEffect(() => {
+    if (!dashboardQuery.data) {
+      return;
+    }
+    recordLoadTrace("dashboard.render.ready", {
+      scopeDimension: dashboardScope.dimension,
+      scopeId: dashboardScope.scopeId,
+      visibleTenantCount: visibleTenants.length,
+    });
+  }, [dashboardQuery.data, dashboardScope.dimension, dashboardScope.scopeId, visibleTenants.length]);
 
   const scopedTenants = useMemo(() => {
     if (!dashboardScope.usesTenantList) {

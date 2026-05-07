@@ -1,4 +1,5 @@
 import type { ListEnvelope, ResourceEnvelope } from "./types";
+import { recordLoadTrace } from "./loadTrace";
 
 const API_BASE_URL = "/api/v1";
 const DEV_ADMIN_HEADER =
@@ -7,6 +8,11 @@ const DEV_ADMIN_HEADER =
     : "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+  recordLoadTrace("api.request.start", {
+    path,
+    method: init?.method ?? "GET",
+  });
   const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const headers: HeadersInit = {
     ...(isFormData ? {} : { "Content-Type": "application/json" }),
@@ -32,9 +38,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // Fall back to the raw response body when the server did not return JSON.
     }
 
+    recordLoadTrace("api.request.error", {
+      path,
+      method: init?.method ?? "GET",
+      status: response.status,
+      durationMs: Number(((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt).toFixed(1)),
+    });
     throw new Error(message || `Request failed with status ${response.status}`);
   }
 
+  recordLoadTrace("api.request.success", {
+    path,
+    method: init?.method ?? "GET",
+    status: response.status,
+    durationMs: Number(((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt).toFixed(1)),
+  });
   return (await response.json()) as T;
 }
 

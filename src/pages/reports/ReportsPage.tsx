@@ -136,10 +136,6 @@ export function ReportsPage() {
     },
   });
 
-  if (scopeLoading) {
-    return <LoadingBlock label="Loading reporting workspace..." />;
-  }
-
   const report = reportQuery.data?.resource;
   const selectedReportType = reportTypeOptions.find((option) => option.value === reportType);
   const rangeLabel = getRangeLabel(rangeKey);

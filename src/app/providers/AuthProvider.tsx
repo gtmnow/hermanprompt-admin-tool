@@ -1,6 +1,7 @@
 import { createContext, type PropsWithChildren, useContext, useEffect, useMemo, useState } from "react";
 
 import { AuthApiError, authApi } from "../../lib/auth";
+import { recordLoadTrace } from "../../lib/loadTrace";
 import type { AuthSession } from "../../lib/types";
 import { queryClient } from "./AppProviders";
 
@@ -37,6 +38,7 @@ async function initializeSession(): Promise<AuthSession | null> {
   const url = new URL(window.location.href);
   const launchToken = url.searchParams.get(LAUNCH_PARAM_NAME);
   if (launchToken) {
+    recordLoadTrace("auth.initialize.launch-token.detected");
     const session = await authApi.exchangeLaunchToken(launchToken);
     url.searchParams.delete(LAUNCH_PARAM_NAME);
     window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
@@ -59,16 +61,26 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const refreshSession = async () => {
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    recordLoadTrace("auth.refresh.start");
     setStatus("loading");
     setErrorMessage(null);
     try {
       const nextSession = await initializeSession();
       setSession(nextSession);
       setStatus(nextSession ? "authenticated" : "unauthenticated");
+      recordLoadTrace("auth.refresh.success", {
+        authenticated: Boolean(nextSession),
+        durationMs: Number(((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt).toFixed(1)),
+      });
     } catch (error) {
       setSession(null);
       setStatus("unauthenticated");
       setErrorMessage(parseErrorMessage(error));
+      recordLoadTrace("auth.refresh.error", {
+        message: parseErrorMessage(error),
+        durationMs: Number(((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt).toFixed(1)),
+      });
     }
   };
 
@@ -84,12 +96,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
 
   useEffect(() => {
+    recordLoadTrace("auth.provider.mount");
     void refreshSession();
   }, []);
 
   useEffect(() => {
     queryClient.clear();
   }, [session?.principal.admin_id, session?.principal.user_id_hash, status]);
+
+  useEffect(() => {
+    recordLoadTrace("auth.state.change", {
+      status,
+      hasSession: Boolean(session),
+      adminId: session?.principal.admin_id ?? null,
+    });
+  }, [session, status]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

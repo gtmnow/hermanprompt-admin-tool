@@ -59,7 +59,7 @@ export function ExportsPage() {
                 : undefined,
         status: statusFilter === "all" ? undefined : statusFilter,
       }),
-    enabled: !scopeLoading,
+    enabled: true,
   });
 
   useEffect(() => {
@@ -124,7 +124,7 @@ export function ExportsPage() {
     },
   });
 
-  if (scopeLoading || exportsQuery.isLoading) {
+  if (exportsQuery.isLoading) {
     return <LoadingBlock label="Loading exports..." />;
   }
 

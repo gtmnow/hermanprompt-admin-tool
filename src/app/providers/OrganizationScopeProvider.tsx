@@ -9,6 +9,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import { tenantApi } from "../../features/tenants/api";
+import { recordLoadTrace } from "../../lib/loadTrace";
 import type { TenantSummary } from "../../lib/types";
 import { useAuth } from "./AuthProvider";
 
@@ -37,6 +38,17 @@ export function OrganizationScopeProvider({ children }: PropsWithChildren) {
   const visibleTenants = tenantsQuery.data?.items ?? [];
   const hasMultipleVisibleTenants = visibleTenants.length > 1;
   const selectedTenant = visibleTenants.find((tenant) => tenant.tenant.id === selectedTenantId) ?? null;
+
+  useEffect(() => {
+    recordLoadTrace("scope.provider.state", {
+      canReadTenants,
+      isLoading: tenantsQuery.isLoading,
+      isFetching: tenantsQuery.isFetching,
+      hasData: Boolean(tenantsQuery.data),
+      tenantCount: visibleTenants.length,
+      selectedTenantId,
+    });
+  }, [canReadTenants, selectedTenantId, tenantsQuery.data, tenantsQuery.isFetching, tenantsQuery.isLoading, visibleTenants.length]);
 
   useEffect(() => {
     if (tenantsQuery.isLoading) {

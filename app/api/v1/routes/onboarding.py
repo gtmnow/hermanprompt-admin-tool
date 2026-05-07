@@ -1,3 +1,6 @@
+import logging
+from time import perf_counter
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -15,6 +18,7 @@ from app.services import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/tenants", response_model=ListEnvelope[TenantOnboardingStatusSchema])
@@ -22,6 +26,7 @@ def list_onboarding_statuses(
     principal: Principal = Depends(require_permission("tenants.read")),
     db: Session = Depends(get_db),
 ) -> ListEnvelope[TenantOnboardingStatusSchema]:
+    started_at = perf_counter()
     if not table_exists(db, "tenant_onboarding_status"):
         return ListEnvelope[TenantOnboardingStatusSchema](items=[], page=1, page_size=1, total_count=0, filters={})
 
@@ -44,6 +49,18 @@ def list_onboarding_statuses(
             raise
         items.append(TenantOnboardingStatusSchema.model_validate(refresh_onboarding_state(db, tenant.id), from_attributes=True))
     db.commit()
+    logger.info(
+        "onboarding.tenants.list completed",
+        extra={
+            "context": {
+                "role": principal.role,
+                "scope_count": len(principal.scopes),
+                "tenant_ids_examined": len(tenant_ids),
+                "returned_count": len(items),
+                "duration_ms": round((perf_counter() - started_at) * 1000, 1),
+            }
+        },
+    )
     return ListEnvelope[TenantOnboardingStatusSchema](items=items, page=1, page_size=len(items) or 1, total_count=len(items), filters={})
 
 

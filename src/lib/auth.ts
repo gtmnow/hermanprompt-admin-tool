@@ -1,4 +1,5 @@
 import type { AuthSession } from "./types";
+import { recordLoadTrace } from "./loadTrace";
 
 const AUTH_API_BASE_URL = "/api/auth";
 const DEV_ADMIN_HEADER =
@@ -17,6 +18,11 @@ export class AuthApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+  recordLoadTrace("auth.request.start", {
+    path,
+    method: init?.method ?? "GET",
+  });
   const response = await fetch(`${AUTH_API_BASE_URL}${path}`, {
     ...init,
     credentials: "include",
@@ -29,9 +35,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const message = (await response.text()) || `Request failed with status ${response.status}`;
+    recordLoadTrace("auth.request.error", {
+      path,
+      method: init?.method ?? "GET",
+      status: response.status,
+      durationMs: Number(((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt).toFixed(1)),
+    });
     throw new AuthApiError(response.status, message);
   }
 
+  recordLoadTrace("auth.request.success", {
+    path,
+    method: init?.method ?? "GET",
+    status: response.status,
+    durationMs: Number(((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt).toFixed(1)),
+  });
   if (response.status === 204) {
     return undefined as T;
   }

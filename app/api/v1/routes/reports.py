@@ -1,5 +1,7 @@
 import json
+import logging
 from datetime import timezone, datetime
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
@@ -28,6 +30,7 @@ from app.services import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def ensure_report_scope_access(db: Session, principal: Principal, dimension: str, scope_id: str) -> None:
@@ -65,8 +68,11 @@ def run_report(
     principal: Principal = Depends(require_permission("analytics.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[ReportSummary]:
+    started_at = perf_counter()
     ensure_report_scope_access(db, principal, payload.dimension, payload.scope_id)
+    metrics_started_at = perf_counter()
     metrics = build_report_payload(db, payload.dimension, payload.scope_id, payload.start_date, payload.end_date)
+    metrics_duration_ms = round((perf_counter() - metrics_started_at) * 1000, 1)
     summary = ReportSummary(
         report_type=payload.report_type,
         filters=ReportFilterSet(
@@ -113,6 +119,20 @@ def run_report(
             {"metric": "session_count", "value": metrics["session_count"]},
             {"metric": "active_groups", "value": metrics["active_groups"]},
         ],
+    )
+    logger.info(
+        "reports.run completed",
+        extra={
+            "context": {
+                "role": principal.role,
+                "scope_count": len(principal.scopes),
+                "dimension": payload.dimension,
+                "scope_id": payload.scope_id,
+                "report_type": payload.report_type,
+                "metrics_duration_ms": metrics_duration_ms,
+                "duration_ms": round((perf_counter() - started_at) * 1000, 1),
+            }
+        },
     )
     return ResourceEnvelope[ReportSummary](resource=summary)
 
