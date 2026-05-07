@@ -140,7 +140,7 @@ export function ResellersPage() {
   const queryClient = useQueryClient();
   const [selectedResellerId, setSelectedResellerId] = useState("");
   const [createForm, setCreateForm] = useState({
-    reseller_name: "",
+    tenant_id: "",
     service_tier_definition_id: "",
   });
   const [defaultsForm, setDefaultsForm] = useState(emptyDefaults);
@@ -238,7 +238,7 @@ export function ResellersPage() {
   const createResellerMutation = useMutation({
     mutationFn: () =>
       tenantApi.createReseller({
-        reseller_name: createForm.reseller_name.trim(),
+        tenant_id: createForm.tenant_id,
         is_active: true,
         service_tier_definition_id: createForm.service_tier_definition_id || null,
       }),
@@ -246,8 +246,9 @@ export function ResellersPage() {
       setSuccessMessage(null);
     },
     onSuccess: async (result) => {
-      setCreateForm({ reseller_name: "", service_tier_definition_id: "" });
+      setCreateForm({ tenant_id: "", service_tier_definition_id: "" });
       await queryClient.invalidateQueries({ queryKey: ["resellers"] });
+      await queryClient.invalidateQueries({ queryKey: ["tenants"] });
       setSelectedResellerId(result.resource.id);
       setSuccessMessage("Partner created. Next, create a partner admin and assign organizations.");
     },
@@ -407,6 +408,9 @@ export function ResellersPage() {
   const assignedTenants = tenants.filter((item) => item.tenant.reseller_partner_id === selectedResellerId);
   const unassignedTenants = tenants.filter((item) => !item.tenant.reseller_partner_id);
   const transferCandidates = tenants.filter((item) => item.tenant.reseller_partner_id && item.tenant.reseller_partner_id !== selectedResellerId);
+  const partnerCreationCandidates = tenants
+    .filter((item) => !item.tenant.reseller_partner_id)
+    .sort((left, right) => left.tenant.tenant_name.localeCompare(right.tenant.tenant_name));
   const resellerAdmins = admins.filter((admin) =>
     admin.scopes.some((scope) => scope.scope_type === "reseller" && scope.reseller_partner_id === selectedResellerId),
   );
@@ -509,14 +513,21 @@ export function ResellersPage() {
           {successMessage ? <div className="section-note section-note--success">{successMessage}</div> : null}
 
           <div>
-            <label className="field-label" htmlFor="reseller_name">Partner Name</label>
-            <input
+            <label className="field-label" htmlFor="create_reseller_tenant_id">Organization</label>
+            <select
               className="field"
-              id="reseller_name"
-              value={createForm.reseller_name}
-              onChange={(event) => setCreateForm((current) => ({ ...current, reseller_name: event.target.value }))}
-            />
-            <div className="field-tip">A partner key is generated internally from this name when the record is created.</div>
+              id="create_reseller_tenant_id"
+              value={createForm.tenant_id}
+              onChange={(event) => setCreateForm((current) => ({ ...current, tenant_id: event.target.value }))}
+            >
+              <option value="">Select organization</option>
+              {partnerCreationCandidates.map((item) => (
+                <option key={item.tenant.id} value={item.tenant.id}>
+                  {item.tenant.tenant_name}
+                </option>
+              ))}
+            </select>
+            <div className="field-tip">Creating a partner uses the selected organization as the initial organization record for that partner.</div>
           </div>
           <div>
             <label className="field-label" htmlFor="create_reseller_tier">Partner Tier</label>
@@ -537,14 +548,14 @@ export function ResellersPage() {
 
           <button
             className="primary-button"
-            disabled={!createForm.reseller_name.trim()}
+            disabled={!createForm.tenant_id}
             onClick={() => createResellerMutation.mutate()}
             type="button"
           >
             {createResellerMutation.isPending ? "Creating..." : "Create partner"}
           </button>
           <div className="section-note">
-            Creating a partner opens the workspace on the right so you can add the partner admin and assign organizations immediately.
+            Creating a partner assigns the selected organization immediately, then opens the workspace on the right so you can add the partner admin and manage the remaining organizations.
           </div>
         </div>
 
@@ -846,7 +857,7 @@ export function ResellersPage() {
         <div className="panel stack">
           <CardHelpTooltip text="Creates and reviews partner-scoped admin users with a dedicated setup flow based on existing users in the database." />
           <div>
-            <h3 className="panel-title">Partner Admins</h3>
+            <h3 className="panel-title">Partner Administration for {selectedReseller.reseller_name}</h3>
             <div className="muted" style={{ marginTop: 8 }}>
               Create partner-scoped admins with a capability preset. Select an existing user by email, then assign partner scope.
             </div>

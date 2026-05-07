@@ -118,9 +118,17 @@ def create_admin(
         db.add(admin)
         db.flush()
     else:
+        existing_permissions = {
+            item.permission_key
+            for item in db.scalars(select(AdminPermission).where(AdminPermission.admin_user_id == admin.id))
+        }
+        existing_scopes = list(db.scalars(select(AdminScope).where(AdminScope.admin_user_id == admin.id)))
+        recyclable_admin = not admin.is_active and not existing_permissions and not existing_scopes
         admin.is_active = True
         if payload.role == "super_admin" and admin.role != "super_admin":
             admin.role = "super_admin"
+        elif recyclable_admin:
+            admin.role = payload.role
         elif admin.role != payload.role and admin.role != "super_admin":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
