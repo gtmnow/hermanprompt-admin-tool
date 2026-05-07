@@ -2,6 +2,7 @@ import { createContext, type PropsWithChildren, useContext, useEffect, useMemo, 
 
 import { AuthApiError, authApi } from "../../lib/auth";
 import type { AuthSession } from "../../lib/types";
+import { queryClient } from "./AppProviders";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -75,6 +76,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     try {
       await authApi.logout();
     } finally {
+      queryClient.clear();
       setSession(null);
       setStatus("unauthenticated");
       window.location.assign(LOGIN_URL);
@@ -84,6 +86,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     void refreshSession();
   }, []);
+
+  useEffect(() => {
+    queryClient.clear();
+  }, [session?.principal.admin_id, session?.principal.user_id_hash, status]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
