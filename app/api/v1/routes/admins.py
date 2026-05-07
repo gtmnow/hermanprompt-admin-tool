@@ -11,6 +11,8 @@ from app.services import (
     ensure_scope_access,
     get_canonical_user_id_hash,
     get_admin_or_404,
+    get_group_or_404,
+    get_tenant_or_404,
     refresh_onboarding_state,
     resolve_admin_profile_summary,
     sync_auth_user_admin_authority,
@@ -50,7 +52,7 @@ def to_admin_summary(db: Session, admin: AdminUser) -> AdminUserSummary:
     )
 
 
-def can_view_admin(principal: Principal, admin: AdminUser) -> bool:
+def can_view_admin(db: Session, principal: Principal, admin: AdminUser) -> bool:
     if admin.id == principal.admin_id or admin.user_id_hash == principal.user_id_hash:
         return True
 
@@ -65,15 +67,28 @@ def can_view_admin(principal: Principal, admin: AdminUser) -> bool:
         if scope.scope_type == "global":
             continue
         try:
+            tenant_id = scope.tenant_id
+            reseller_partner_id = scope.reseller_partner_id
+            group_id = scope.group_id
+
+            if scope.scope_type == "tenant" and tenant_id:
+                tenant = get_tenant_or_404(db, tenant_id)
+                reseller_partner_id = tenant.reseller_partner_id
+            elif scope.scope_type == "group" and group_id:
+                group = get_group_or_404(db, group_id)
+                tenant_id = group.tenant_id
+                tenant = get_tenant_or_404(db, group.tenant_id)
+                reseller_partner_id = tenant.reseller_partner_id
+
             ensure_scope_access(
                 principal,
-                reseller_partner_id=scope.reseller_partner_id,
-                tenant_id=scope.tenant_id,
-                group_id=scope.group_id,
+                reseller_partner_id=reseller_partner_id,
+                tenant_id=tenant_id,
+                group_id=group_id,
             )
             return True
         except HTTPException as exc:
-            if exc.status_code == status.HTTP_403_FORBIDDEN:
+            if exc.status_code in {status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND}:
                 continue
             raise
 
@@ -92,7 +107,7 @@ def list_admins(
 
     items = []
     for admin in db.scalars(query):
-        if not can_view_admin(principal, admin):
+        if not can_view_admin(db, principal, admin):
             continue
         items.append(to_admin_summary(db, admin))
     return ListEnvelope[AdminUserSummary](items=items, page=1, page_size=len(items) or 1, total_count=len(items), filters={"role": role})

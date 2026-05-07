@@ -18,9 +18,45 @@ from app.schemas import (
 )
 from app.schemas.reports import ChartSeries, ChartSeriesPoint, KpiCard
 from app.security import Principal, require_permission
-from app.services import build_report_payload, create_export_file, ensure_scope_access, write_audit_log
+from app.services import (
+    build_report_payload,
+    create_export_file,
+    ensure_scope_access,
+    get_group_or_404,
+    get_tenant_or_404,
+    write_audit_log,
+)
 
 router = APIRouter()
+
+
+def ensure_report_scope_access(db: Session, principal: Principal, dimension: str, scope_id: str) -> None:
+    reseller_partner_id: str | None = None
+    tenant_id: str | None = None
+    group_id: str | None = None
+
+    if dimension == "reseller":
+        reseller_partner_id = scope_id
+    elif dimension == "organization":
+        tenant = get_tenant_or_404(db, scope_id)
+        reseller_partner_id = tenant.reseller_partner_id
+        tenant_id = tenant.id
+    elif dimension == "group":
+        group = get_group_or_404(db, scope_id)
+        tenant = get_tenant_or_404(db, group.tenant_id)
+        reseller_partner_id = tenant.reseller_partner_id
+        tenant_id = tenant.id
+        group_id = group.id
+    else:
+        tenant_id = scope_id if dimension == "organization" else None
+        group_id = scope_id if dimension == "group" else None
+
+    ensure_scope_access(
+        principal,
+        reseller_partner_id=reseller_partner_id,
+        tenant_id=tenant_id,
+        group_id=group_id,
+    )
 
 
 @router.post("/run", response_model=ResourceEnvelope[ReportSummary])
@@ -29,12 +65,7 @@ def run_report(
     principal: Principal = Depends(require_permission("analytics.read")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[ReportSummary]:
-    ensure_scope_access(
-        principal,
-        reseller_partner_id=payload.scope_id if payload.dimension == "reseller" else None,
-        tenant_id=payload.scope_id if payload.dimension == "organization" else None,
-        group_id=payload.scope_id if payload.dimension == "group" else None,
-    )
+    ensure_report_scope_access(db, principal, payload.dimension, payload.scope_id)
     metrics = build_report_payload(db, payload.dimension, payload.scope_id, payload.start_date, payload.end_date)
     summary = ReportSummary(
         report_type=payload.report_type,
@@ -93,12 +124,7 @@ def create_report_export(
     principal: Principal = Depends(require_permission("analytics.export")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[ReportExportJobSummary]:
-    ensure_scope_access(
-        principal,
-        reseller_partner_id=payload.scope_id if payload.dimension == "reseller" else None,
-        tenant_id=payload.scope_id if payload.dimension == "organization" else None,
-        group_id=payload.scope_id if payload.dimension == "group" else None,
-    )
+    ensure_report_scope_access(db, principal, payload.dimension, payload.scope_id)
     job = ReportExportJob(
         requested_by_admin_user_id=principal.admin_id,
         report_type=payload.report_type,
@@ -152,12 +178,7 @@ def list_report_exports(
 
     items = []
     for job in db.scalars(query):
-        ensure_scope_access(
-            principal,
-            reseller_partner_id=job.scope_id if job.scope_type == "reseller" else None,
-            tenant_id=job.scope_id if job.scope_type == "organization" else None,
-            group_id=job.scope_id if job.scope_type == "group" else None,
-        )
+        ensure_report_scope_access(db, principal, job.scope_type, job.scope_id)
         items.append(ReportExportJobSummary.model_validate(job, from_attributes=True))
 
     start = (page - 1) * page_size
@@ -180,12 +201,7 @@ def get_report_export(
     job = db.get(ReportExportJob, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found")
-    ensure_scope_access(
-        principal,
-        reseller_partner_id=job.scope_id if job.scope_type == "reseller" else None,
-        tenant_id=job.scope_id if job.scope_type == "organization" else None,
-        group_id=job.scope_id if job.scope_type == "group" else None,
-    )
+    ensure_report_scope_access(db, principal, job.scope_type, job.scope_id)
     return ResourceEnvelope[ReportExportJobSummary](
         resource=ReportExportJobSummary.model_validate(job, from_attributes=True),
         updated_at=job.completed_at or job.created_at,

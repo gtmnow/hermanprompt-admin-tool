@@ -2822,11 +2822,28 @@ def can_view_audit_entry(db: Session, principal: Principal, entry: AdminAuditLog
                 return False
             scopes = list(db.scalars(select(AdminScope).where(AdminScope.admin_user_id == admin.id)))
             for scope in scopes:
+                reseller_partner_id = scope.reseller_partner_id
+                tenant_id = scope.tenant_id
+                group_id = scope.group_id
+
+                if scope.scope_type == "tenant" and tenant_id:
+                    tenant = db.get(Tenant, tenant_id)
+                    if tenant is None:
+                        continue
+                    reseller_partner_id = tenant.reseller_partner_id
+                elif scope.scope_type == "group" and group_id:
+                    group = db.get(Group, group_id)
+                    if group is None:
+                        continue
+                    tenant_id = group.tenant_id
+                    tenant = db.get(Tenant, group.tenant_id)
+                    reseller_partner_id = tenant.reseller_partner_id if tenant else None
+
                 ensure_scope_access(
                     principal,
-                    reseller_partner_id=scope.reseller_partner_id,
-                    tenant_id=scope.tenant_id,
-                    group_id=scope.group_id,
+                    reseller_partner_id=reseller_partner_id,
+                    tenant_id=tenant_id,
+                    group_id=group_id,
                 )
                 return True
             return False
