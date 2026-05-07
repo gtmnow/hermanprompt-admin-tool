@@ -555,17 +555,19 @@ def update_tenant(
     ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
     before = serialize_model(tenant)
 
-    updates = payload.model_dump(exclude_none=True, mode="json")
+    updates = payload.model_dump(exclude_unset=True, mode="json")
     requested_tier = None
     if "reseller_partner_id" in updates and updates["reseller_partner_id"]:
         ensure_scope_access(principal, reseller_partner_id=str(updates["reseller_partner_id"]))
     if "service_tier_definition_id" in updates:
-        requested_tier = get_service_tier_or_404(
-            db,
-            str(updates.pop("service_tier_definition_id")),
-            scope_type="organization",
-            require_active=True,
-        )
+        requested_tier_id = updates.pop("service_tier_definition_id")
+        if requested_tier_id is not None:
+            requested_tier = get_service_tier_or_404(
+                db,
+                str(requested_tier_id),
+                scope_type="organization",
+                require_active=True,
+            )
     elif "plan_tier" in updates and updates["plan_tier"]:
         updates.pop("plan_tier")
     profile_updates = {

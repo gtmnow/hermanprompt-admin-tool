@@ -320,7 +320,7 @@ export function ResellersPage() {
         queryClient.invalidateQueries({ queryKey: ["onboarding"] }),
         queryClient.invalidateQueries({ queryKey: ["resellers"] }),
       ]);
-      setSuccessMessage("Organization assigned to partner.");
+      setSuccessMessage("Tenant assigned to partner.");
     },
   });
 
@@ -336,7 +336,7 @@ export function ResellersPage() {
         queryClient.invalidateQueries({ queryKey: ["resellers"] }),
       ]);
       setPendingTenantRemoval(null);
-      setSuccessMessage("Organization removed from partner.");
+      setSuccessMessage("Tenant moved to unassigned to a partner.");
     },
   });
 
@@ -614,12 +614,12 @@ export function ResellersPage() {
 
       {selectedReseller ? (
         <div className="grid grid--two">
-          <div className="panel stack">
-            <CardHelpTooltip text="Lets admins assign, unassign, and transfer tenants inside the selected partner portfolio." />
+        <div className="panel stack">
+            <CardHelpTooltip text="Lets admins assign, unassign, and transfer tenants inside the selected partner tenant scope." />
             <div>
-              <h3 className="panel-title">Portfolio Scope</h3>
+              <h3 className="panel-title">Tenant Scope for {selectedReseller.reseller_name}</h3>
               <div className="muted" style={{ marginTop: 8 }}>
-                Assign customer tenants that this partner should own, including controlled transfers from other partner portfolios when needed.
+                Assign customer tenants that this partner should own, including controlled transfers from other partners when needed.
               </div>
             </div>
 
@@ -673,7 +673,7 @@ export function ResellersPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Unassigned Tenant</th>
+                    <th>Unassigned to a Partner</th>
                     <th>Status</th>
                     <th>Action</th>
                   </tr>
@@ -681,7 +681,7 @@ export function ResellersPage() {
                 <tbody>
                   {unassignedTenants.length === 0 ? (
                     <tr>
-                      <td colSpan={3}>No unassigned tenants are currently available.</td>
+                      <td colSpan={3}>No tenants are currently unassigned to a partner.</td>
                     </tr>
                   ) : (
                     unassignedTenants.map((tenant) => (
@@ -755,11 +755,11 @@ export function ResellersPage() {
           </div>
 
         <div className="panel stack">
-          <CardHelpTooltip text="Summarizes onboarding, LLM, and health signals across the selected partner's tenant portfolio." />
+          <CardHelpTooltip text="Summarizes onboarding, LLM, and health signals across the selected partner's tenants." />
           <div>
-            <h3 className="panel-title">Portfolio Health</h3>
+            <h3 className="panel-title">Tenant Health for {selectedReseller.reseller_name}</h3>
             <div className="muted" style={{ marginTop: 8 }}>
-              Review portfolio-wide onboarding, credential, and activation health for this partner.
+              Review onboarding, credential, and activation health across this partner's tenants.
             </div>
           </div>
 
@@ -1262,18 +1262,18 @@ export function ResellersPage() {
             aria-labelledby="partner-tenant-removal-dialog-title"
             onClick={(event) => event.stopPropagation()}
           >
-            <CardHelpTooltip text="Confirms removing the organization from the current partner portfolio and returning it to the unassigned tenant pool." />
+            <CardHelpTooltip text="Confirms removing the tenant from the current partner scope and returning it to the unassigned to a partner list." />
             <div className="split-header">
               <div>
-                <h3 className="panel-title" id="partner-tenant-removal-dialog-title">Remove Organization From Partner</h3>
+                <h3 className="panel-title" id="partner-tenant-removal-dialog-title">Remove Tenant From Partner</h3>
                 <div className="muted" style={{ marginTop: 6 }}>
-                  {pendingTenantRemoval.tenantName} will be removed from {selectedReseller.reseller_name} and moved into the unassigned tenant state.
+                  {pendingTenantRemoval.tenantName} will be removed from {selectedReseller.reseller_name} and moved into Unassigned to a Partner.
                 </div>
               </div>
             </div>
 
             <div className="section-note section-note--danger" style={{ marginTop: 18 }}>
-              This only removes the organization from the partner portfolio. It does not delete the organization or its users.
+              This only removes the tenant from the partner scope. It does not delete the tenant or its users.
             </div>
 
             {unassignTenantMutation.error ? (
