@@ -1,4 +1,4 @@
-import { createContext, type PropsWithChildren, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, type PropsWithChildren, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { AuthApiError, authApi } from "../../lib/auth";
 import { recordLoadTrace } from "../../lib/loadTrace";
@@ -59,6 +59,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [session, setSession] = useState<AuthSession | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const previousAdminIdRef = useRef<string | null>(null);
 
   const refreshSession = async () => {
     const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -101,8 +102,23 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    queryClient.clear();
-  }, [session?.principal.admin_id, session?.principal.user_id_hash, status]);
+    if (status !== "authenticated") {
+      previousAdminIdRef.current = null;
+      return;
+    }
+
+    const currentAdminId = session?.principal.admin_id ?? null;
+
+    if (!currentAdminId) {
+      return;
+    }
+
+    if (previousAdminIdRef.current && previousAdminIdRef.current !== currentAdminId) {
+      queryClient.clear();
+    }
+
+    previousAdminIdRef.current = currentAdminId;
+  }, [session?.principal.admin_id, status]);
 
   useEffect(() => {
     recordLoadTrace("auth.state.change", {

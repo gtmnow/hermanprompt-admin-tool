@@ -30,7 +30,7 @@ export function OrganizationScopeProvider({ children }: PropsWithChildren) {
   const canReadTenants = session?.principal.permissions.includes("tenants.read") ?? false;
 
   const tenantsQuery = useQuery({
-    queryKey: ["visible-tenants"],
+    queryKey: ["visible-tenants", session?.principal.admin_id ?? null],
     queryFn: () => tenantApi.listTenants(),
     enabled: canReadTenants,
   });
@@ -38,20 +38,27 @@ export function OrganizationScopeProvider({ children }: PropsWithChildren) {
   const visibleTenants = tenantsQuery.data?.items ?? [];
   const hasMultipleVisibleTenants = visibleTenants.length > 1;
   const selectedTenant = visibleTenants.find((tenant) => tenant.tenant.id === selectedTenantId) ?? null;
+  const isLoading =
+    canReadTenants &&
+    visibleTenants.length === 0 &&
+    !tenantsQuery.isError &&
+    (tenantsQuery.isPending || tenantsQuery.fetchStatus === "fetching");
 
   useEffect(() => {
     recordLoadTrace("scope.provider.state", {
       canReadTenants,
-      isLoading: tenantsQuery.isLoading,
+      isLoading,
+      isPending: tenantsQuery.isPending,
       isFetching: tenantsQuery.isFetching,
+      isError: tenantsQuery.isError,
       hasData: Boolean(tenantsQuery.data),
       tenantCount: visibleTenants.length,
       selectedTenantId,
     });
-  }, [canReadTenants, selectedTenantId, tenantsQuery.data, tenantsQuery.isFetching, tenantsQuery.isLoading, visibleTenants.length]);
+  }, [canReadTenants, isLoading, selectedTenantId, tenantsQuery.data, tenantsQuery.isError, tenantsQuery.isFetching, tenantsQuery.isPending, visibleTenants.length]);
 
   useEffect(() => {
-    if (tenantsQuery.isLoading) {
+    if (isLoading) {
       return;
     }
 
@@ -72,7 +79,7 @@ export function OrganizationScopeProvider({ children }: PropsWithChildren) {
       }
       return null;
     });
-  }, [tenantsQuery.isLoading, visibleTenants]);
+  }, [isLoading, visibleTenants]);
 
   return (
     <OrganizationScopeContext.Provider
@@ -81,7 +88,7 @@ export function OrganizationScopeProvider({ children }: PropsWithChildren) {
         selectedTenantId,
         selectedTenant,
         hasMultipleVisibleTenants,
-        isLoading: tenantsQuery.isLoading,
+        isLoading,
         setSelectedTenantId,
       }}
     >
