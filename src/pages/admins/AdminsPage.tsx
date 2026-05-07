@@ -668,17 +668,7 @@ export function AdminsPage() {
               {createSuperAdminMutation.isPending ? "Assigning..." : "Assign Super Admin"}
             </button>
           </div>
-        ) : (
-          <div className="panel stack">
-            <CardHelpTooltip text="Explains why super admin assignment is restricted and unavailable in the current session." />
-            <div>
-              <h3 className="panel-title">Super Admin Access</h3>
-              <div className="muted" style={{ marginTop: 8 }}>
-                This assignment card is visible only to existing super admins so platform-wide access stays tightly controlled.
-              </div>
-            </div>
-          </div>
-        )}
+        ) : null}
       </div>
 
       <div className="panel stack">

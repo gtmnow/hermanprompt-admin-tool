@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
+import { useOrganizationScope } from "../../app/providers/OrganizationScopeProvider";
 import { CardHelpTooltip } from "../../components/cards/CardHelpTooltip";
 import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
@@ -186,6 +187,7 @@ function sortUsers(
 }
 
 export function UsersPage() {
+  const { selectedTenantId, visibleTenants } = useOrganizationScope();
   const [search, setSearch] = useState("");
   const [tenantId, setTenantId] = useState("all");
   const [groupId, setGroupId] = useState("");
@@ -459,6 +461,16 @@ export function UsersPage() {
   }
 
   useEffect(() => {
+    if (selectedTenantId && tenantId === "all") {
+      setTenantId(selectedTenantId);
+      return;
+    }
+    if (!selectedTenantId && visibleTenants.length === 0 && tenantId !== "all") {
+      setTenantId("all");
+    }
+  }, [selectedTenantId, tenantId, visibleTenants.length]);
+
+  useEffect(() => {
     if (tenantId === "all") {
       setGroupId("");
       return;
@@ -535,7 +547,7 @@ export function UsersPage() {
           </div>
         </div>
 
-        <div className="field-row field-row--three">
+        <div className="users-page__inventory-filters">
           <div>
             <label className="field-label" htmlFor="users_search">Search</label>
             <input
@@ -578,9 +590,6 @@ export function UsersPage() {
               ))}
             </select>
           </div>
-        </div>
-
-        <div className="field-row field-row--three">
           <div>
             <label className="field-label" htmlFor="users_status_filter">Status</label>
             <select

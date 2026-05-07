@@ -744,7 +744,12 @@ def list_users(
         visible_tenant_id = map_snapshot_tenant_to_visible_tenant_id(db, str(row["tenant_id"]))
         if tenant_id and visible_tenant_id != tenant_id:
             continue
-        ensure_scope_access(principal, tenant_id=visible_tenant_id, group_id=group_id)
+        try:
+            ensure_scope_access(principal, tenant_id=visible_tenant_id, group_id=group_id)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_403_FORBIDDEN:
+                continue
+            raise
         item = safe_auth_row_to_list_summary(
             db,
             row,
@@ -759,7 +764,12 @@ def list_users(
     if tenant_id:
         memberships = [membership for membership in memberships if membership.tenant_id == tenant_id]
     for membership in memberships:
-        ensure_scope_access(principal, tenant_id=membership.tenant_id, group_id=group_id)
+        try:
+            ensure_scope_access(principal, tenant_id=membership.tenant_id, group_id=group_id)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_403_FORBIDDEN:
+                continue
+            raise
         if group_id:
             group_membership = db.scalar(
                 select(UserGroupMembership).where(

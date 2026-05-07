@@ -50,6 +50,36 @@ def to_admin_summary(db: Session, admin: AdminUser) -> AdminUserSummary:
     )
 
 
+def can_view_admin(principal: Principal, admin: AdminUser) -> bool:
+    if admin.id == principal.admin_id or admin.user_id_hash == principal.user_id_hash:
+        return True
+
+    if principal.role == "super_admin":
+        return True
+
+    scopes = list(admin.scopes)
+    if not scopes:
+        return False
+
+    for scope in scopes:
+        if scope.scope_type == "global":
+            continue
+        try:
+            ensure_scope_access(
+                principal,
+                reseller_partner_id=scope.reseller_partner_id,
+                tenant_id=scope.tenant_id,
+                group_id=scope.group_id,
+            )
+            return True
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_403_FORBIDDEN:
+                continue
+            raise
+
+    return False
+
+
 @router.get("", response_model=ListEnvelope[AdminUserSummary])
 def list_admins(
     role: str | None = Query(default=None),
@@ -62,15 +92,8 @@ def list_admins(
 
     items = []
     for admin in db.scalars(query):
-        if admin.scopes:
-            for scope in admin.scopes:
-                ensure_scope_access(
-                    principal,
-                    reseller_partner_id=scope.reseller_partner_id,
-                    tenant_id=scope.tenant_id,
-                    group_id=scope.group_id,
-                )
-                break
+        if not can_view_admin(principal, admin):
+            continue
         items.append(to_admin_summary(db, admin))
     return ListEnvelope[AdminUserSummary](items=items, page=1, page_size=len(items) or 1, total_count=len(items), filters={"role": role})
 

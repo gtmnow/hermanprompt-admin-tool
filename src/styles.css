@@ -861,6 +861,18 @@ button {
   margin-bottom: 14px;
 }
 
+.users-page__inventory-filters {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(260px, 1.5fr) repeat(4, minmax(150px, 1fr));
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.users-page__inventory-filters .field {
+  min-width: 0;
+}
+
 .users-page__search {
   flex: 1 1 340px;
   max-width: 640px;
@@ -1198,6 +1210,10 @@ button {
     max-width: none;
   }
 
+  .users-page__inventory-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .users-page__dialog {
     width: min(1040px, calc(100vw - 40px));
   }
@@ -1225,7 +1241,8 @@ button {
   .grid--two,
   .field-row,
   .field-row--three,
-  .kpi-grid {
+  .kpi-grid,
+  .users-page__inventory-filters {
     grid-template-columns: 1fr;
   }
 
