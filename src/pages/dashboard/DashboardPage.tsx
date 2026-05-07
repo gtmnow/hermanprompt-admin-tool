@@ -113,12 +113,12 @@ export function DashboardPage() {
   const dashboardQuery = useQuery({
     queryKey: ["dashboard", dashboardScope.dimension, dashboardScope.scopeId, rangeKey],
     queryFn: () => getDashboardData({ dimension: dashboardScope.dimension, scopeId: dashboardScope.scopeId }, rangeKey),
-    enabled: !scopeIsLoading,
+    enabled: Boolean(session?.principal),
   });
   const onboardingQuery = useQuery({
     queryKey: ["dashboard-onboarding", dashboardScope.effectiveTenantId ?? dashboardScope.scopeId],
     queryFn: () => tenantApi.listOnboarding(),
-    enabled: !scopeIsLoading && canReadTenants,
+    enabled: canReadTenants && !scopeIsLoading,
   });
 
   const scopedTenants = useMemo(() => {
@@ -169,7 +169,7 @@ export function DashboardPage() {
     ];
   }, [dashboardQuery.data, scopedOnboarding, scopedTenants, visibleTenants.length]);
 
-  if (scopeIsLoading || dashboardQuery.isLoading) {
+  if (dashboardQuery.isLoading) {
     return <LoadingBlock label="Loading dashboard summary..." />;
   }
 
