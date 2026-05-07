@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,7 @@ from app.services import (
     get_service_tier_or_404,
     get_or_create_reseller_defaults,
     get_reseller_or_404,
+    get_tenant_or_404,
     inactivate_reseller_state,
     serialize_model,
     sync_reseller_default_service_tier_fields,
@@ -97,8 +98,17 @@ def create_reseller(
     principal: Principal = Depends(require_permission("resellers.create")),
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[ResellerPartnerSchema]:
-    payload_data = payload.model_dump()
-    payload_data["reseller_key"] = payload.reseller_key or generate_reseller_key(db, payload.reseller_name)
+    tenant = get_tenant_or_404(db, str(payload.tenant_id))
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
+    if tenant.reseller_partner_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{tenant.tenant_name} is already assigned to a partner.",
+        )
+
+    payload_data = payload.model_dump(exclude={"tenant_id"})
+    payload_data["reseller_name"] = tenant.tenant_name
+    payload_data["reseller_key"] = payload.reseller_key or generate_reseller_key(db, tenant.tenant_name)
     reseller = ResellerPartner(**payload_data)
     if payload.service_tier_definition_id:
         tier = get_service_tier_or_404(
@@ -110,7 +120,8 @@ def create_reseller(
         sync_reseller_service_tier_fields(reseller, tier)
     db.add(reseller)
     db.flush()
-    validate_reseller_capacity(db, reseller)
+    tenant.reseller_partner_id = reseller.id
+    validate_reseller_capacity(db, reseller, tenant_to_include=tenant, tenant_tier_override=tenant.service_tier)
     write_audit_log(
         db,
         principal,

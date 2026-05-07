@@ -38,7 +38,7 @@ export const tenantApi = {
   listResellers() {
     return api.getList<ResellerPartner>("/resellers");
   },
-  createReseller(payload: { reseller_name: string; is_active?: boolean; service_tier_definition_id?: string | null }) {
+  createReseller(payload: { tenant_id: string; is_active?: boolean; service_tier_definition_id?: string | null }) {
     return api.postResource<ResellerPartner>("/resellers", payload);
   },
   updateReseller(resellerId: string, payload: Record<string, unknown>) {
