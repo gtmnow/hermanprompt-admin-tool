@@ -31,7 +31,8 @@ def list_groups(
 
     items = []
     for group in db.scalars(query):
-        ensure_scope_access(principal, tenant_id=group.tenant_id, group_id=group.id)
+        tenant = get_tenant_or_404(db, group.tenant_id)
+        ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=group.tenant_id, group_id=group.id)
         items.append(to_group_schema(group))
 
     start = (page - 1) * page_size
@@ -88,7 +89,8 @@ def update_group(
     db: Session = Depends(get_db),
 ) -> ResourceEnvelope[GroupSchema]:
     group = get_group_or_404(db, group_id)
-    ensure_scope_access(principal, tenant_id=group.tenant_id, group_id=group.id)
+    tenant = get_tenant_or_404(db, group.tenant_id)
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=group.tenant_id, group_id=group.id)
     before = serialize_model(group)
     updates = payload.model_dump(exclude_none=True, mode="json")
     profile_updates = {key: updates.pop(key) for key in ["description", "business_unit", "owner_name"] if key in updates}

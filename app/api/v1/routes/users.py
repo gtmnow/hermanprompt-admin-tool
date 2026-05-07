@@ -750,7 +750,13 @@ def list_users(
         if tenant_id and visible_tenant_id != tenant_id:
             continue
         try:
-            ensure_scope_access(principal, tenant_id=visible_tenant_id, group_id=group_id)
+            visible_tenant = db.get(Tenant, visible_tenant_id)
+            ensure_scope_access(
+                principal,
+                reseller_partner_id=visible_tenant.reseller_partner_id if visible_tenant else None,
+                tenant_id=visible_tenant_id,
+                group_id=group_id,
+            )
         except HTTPException as exc:
             if exc.status_code == status.HTTP_403_FORBIDDEN:
                 continue
@@ -770,7 +776,13 @@ def list_users(
         memberships = [membership for membership in memberships if membership.tenant_id == tenant_id]
     for membership in memberships:
         try:
-            ensure_scope_access(principal, tenant_id=membership.tenant_id, group_id=group_id)
+            tenant = get_tenant_or_404(db, membership.tenant_id)
+            ensure_scope_access(
+                principal,
+                reseller_partner_id=tenant.reseller_partner_id,
+                tenant_id=membership.tenant_id,
+                group_id=group_id,
+            )
         except HTTPException as exc:
             if exc.status_code == status.HTTP_403_FORBIDDEN:
                 continue
@@ -919,14 +931,20 @@ def get_user_memberships(
     seen_memberships: set[tuple[str, str]] = set()
     for row in auth_rows:
         visible_tenant_id = map_snapshot_tenant_to_visible_tenant_id(db, str(row["tenant_id"]))
-        ensure_scope_access(principal, tenant_id=visible_tenant_id)
+        visible_tenant = db.get(Tenant, visible_tenant_id)
+        ensure_scope_access(
+            principal,
+            reseller_partner_id=visible_tenant.reseller_partner_id if visible_tenant else None,
+            tenant_id=visible_tenant_id,
+        )
         item = safe_auth_row_to_summary(db, row, visible_tenant_id)
         items.append(item)
         seen_memberships.add((item.user_id_hash, str(item.tenant_id)))
 
     memberships = list(db.scalars(select(UserTenantMembership).where(UserTenantMembership.user_id_hash == user_id_hash)))
     for membership in memberships:
-        ensure_scope_access(principal, tenant_id=membership.tenant_id)
+        tenant = get_tenant_or_404(db, membership.tenant_id)
+        ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=membership.tenant_id)
         membership_key = (membership.user_id_hash, membership.tenant_id)
         if membership_key in seen_memberships:
             continue
@@ -945,7 +963,7 @@ def update_user_membership(
     db: Session = Depends(get_db),
 ) -> ListEnvelope[UserMembershipSummary]:
     tenant = get_tenant_or_404(db, tenant_id)
-    ensure_scope_access(principal, tenant_id=tenant.id)
+    ensure_scope_access(principal, reseller_partner_id=tenant.reseller_partner_id, tenant_id=tenant.id)
     before_rows = [row for row in get_auth_users(db, user_id_hash) if str(row["tenant_id"]) in auth_tenant_candidates(tenant)]
     membership = db.scalar(
         select(UserTenantMembership).where(
