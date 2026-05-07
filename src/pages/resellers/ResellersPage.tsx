@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -7,7 +7,7 @@ import { LoadingBlock } from "../../components/feedback/LoadingBlock";
 import { StatusBadge } from "../../components/status/StatusBadge";
 import { tenantApi } from "../../features/tenants/api";
 import { titleCase } from "../../lib/format";
-import type { ResellerLifecycleAction, ResellerTenantDefaults } from "../../lib/types";
+import type { ResellerLifecycleAction, ResellerTenantDefaults, UserMembership } from "../../lib/types";
 
 const emptyDefaults: Omit<ResellerTenantDefaults, "id" | "reseller_partner_id" | "created_at" | "updated_at"> = {
   default_plan_tier: "",
@@ -119,6 +119,23 @@ function lifecycleActionDescription(action: ResellerLifecycleAction, partnerName
   return `This will permanently delete inactive partner ${partnerName} and also delete ${counts.organizationCount} owned organization(s) and ${counts.userCount} related user account(s).`;
 }
 
+function buildUserLabel(user: UserMembership) {
+  const fullName = `${user.profile?.first_name ?? ""} ${user.profile?.last_name ?? ""}`.trim();
+  const email = user.profile?.email?.trim() ?? "";
+  if (fullName && email) {
+    return `${email} (${fullName})`;
+  }
+  return email || fullName || user.user_id_hash;
+}
+
+function buildPartnerAdminProfile(user: UserMembership) {
+  return {
+    display_name: `${user.profile?.first_name ?? ""} ${user.profile?.last_name ?? ""}`.trim(),
+    email: user.profile?.email?.trim() ?? "",
+    user_id_hash: user.user_id_hash,
+  };
+}
+
 export function ResellersPage() {
   const queryClient = useQueryClient();
   const [selectedResellerId, setSelectedResellerId] = useState("");
@@ -149,6 +166,10 @@ export function ResellersPage() {
   const adminsQuery = useQuery({
     queryKey: ["admins"],
     queryFn: () => tenantApi.getAdmins(),
+  });
+  const usersQuery = useQuery({
+    queryKey: ["partner-admin-users"],
+    queryFn: () => tenantApi.getUsers(),
   });
   const onboardingQuery = useQuery({
     queryKey: ["onboarding"],
@@ -344,6 +365,7 @@ export function ResellersPage() {
     resellersQuery.isLoading ||
     tenantsQuery.isLoading ||
     adminsQuery.isLoading ||
+    usersQuery.isLoading ||
     onboardingQuery.isLoading ||
     platformManagedLlmsQuery.isLoading ||
     resellerTiersQuery.isLoading ||
@@ -355,6 +377,7 @@ export function ResellersPage() {
   const resellers = resellersQuery.data?.items ?? [];
   const tenants = tenantsQuery.data?.items ?? [];
   const admins = adminsQuery.data?.items ?? [];
+  const users = usersQuery.data?.items ?? [];
   const onboarding = onboardingQuery.data?.items ?? [];
   const platformManagedLlms = platformManagedLlmsQuery.data?.items ?? [];
   const resellerTiers = resellerTiersQuery.data?.items ?? [];
@@ -365,6 +388,26 @@ export function ResellersPage() {
   const transferCandidates = tenants.filter((item) => item.tenant.reseller_partner_id && item.tenant.reseller_partner_id !== selectedResellerId);
   const resellerAdmins = admins.filter((admin) =>
     admin.scopes.some((scope) => scope.scope_type === "reseller" && scope.reseller_partner_id === selectedResellerId),
+  );
+  const partnerAdminCandidates = useMemo(() => {
+    const seenEmails = new Set<string>();
+    return [...users]
+      .filter((user) => {
+        const email = user.profile?.email?.trim().toLowerCase();
+        if (!email || seenEmails.has(email)) {
+          return false;
+        }
+        seenEmails.add(email);
+        return true;
+      })
+      .sort((left, right) => buildUserLabel(left).localeCompare(buildUserLabel(right)));
+  }, [users]);
+  const selectedPartnerAdminUser = useMemo(
+    () =>
+      partnerAdminCandidates.find(
+        (user) => user.profile?.email?.trim().toLowerCase() === adminForm.email.trim().toLowerCase(),
+      ) ?? null,
+    [adminForm.email, partnerAdminCandidates],
   );
   const readyTenants = assignedTenants.filter((item) =>
     onboarding.some((status) => status.tenant_id === item.tenant.id && (status.onboarding_status === "ready" || status.onboarding_status === "live")),
@@ -614,7 +657,7 @@ export function ResellersPage() {
 
       {selectedReseller ? (
         <div className="grid grid--two">
-        <div className="panel stack">
+          <div className="panel stack">
             <CardHelpTooltip text="Lets admins assign, unassign, and transfer tenants inside the selected partner tenant scope." />
             <div>
               <h3 className="panel-title">Tenant Scope for {selectedReseller.reseller_name}</h3>
@@ -754,80 +797,113 @@ export function ResellersPage() {
             </div>
           </div>
 
-        <div className="panel stack">
-          <CardHelpTooltip text="Summarizes onboarding, LLM, and health signals across the selected partner's tenants." />
-          <div>
-            <h3 className="panel-title">Tenant Health for {selectedReseller.reseller_name}</h3>
-            <div className="muted" style={{ marginTop: 8 }}>
-              Review onboarding, credential, and activation health across this partner's tenants.
+          <div className="panel stack">
+            <CardHelpTooltip text="Summarizes onboarding, LLM, and health signals across the selected partner's tenants." />
+            <div>
+              <h3 className="panel-title">Tenant Health for {selectedReseller.reseller_name}</h3>
+              <div className="muted" style={{ marginTop: 8 }}>
+                Review onboarding, credential, and activation health across this partner's tenants.
+              </div>
             </div>
-          </div>
 
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Tenant</th>
-                  <th>Onboarding</th>
-                  <th>LLM</th>
-                  <th>Health</th>
-                </tr>
-              </thead>
-              <tbody>
-                {portfolioHealthRows.length === 0 ? (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
                   <tr>
-                    <td colSpan={4}>No tenants are assigned to this partner yet.</td>
+                    <th>Tenant</th>
+                    <th>Onboarding</th>
+                    <th>LLM</th>
+                    <th>Health</th>
                   </tr>
-                ) : (
-                  portfolioHealthRows.map(({ tenant, onboardingState, issueSummary }) => (
-                    <tr key={tenant.tenant.id}>
-                      <td>
-                        <strong>{tenant.tenant.tenant_name}</strong>
-                        <div className="muted">{tenant.profile?.service_mode ?? tenant.tenant.tenant_key}</div>
-                      </td>
-                      <td><StatusBadge value={onboardingState?.onboarding_status ?? "draft"} /></td>
-                      <td>{tenant.llm_config?.credential_status ?? "Not configured"}</td>
-                      <td>{issueSummary}</td>
+                </thead>
+                <tbody>
+                  {portfolioHealthRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={4}>No tenants are assigned to this partner yet.</td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    portfolioHealthRows.map(({ tenant, onboardingState, issueSummary }) => (
+                      <tr key={tenant.tenant.id}>
+                        <td>
+                          <strong>{tenant.tenant.tenant_name}</strong>
+                          <div className="muted">{tenant.profile?.service_mode ?? tenant.tenant.tenant_key}</div>
+                        </td>
+                        <td><StatusBadge value={onboardingState?.onboarding_status ?? "draft"} /></td>
+                        <td>{tenant.llm_config?.credential_status ?? "Not configured"}</td>
+                        <td>{issueSummary}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedReseller ? (
+        <div className="panel stack">
+          <CardHelpTooltip text="Creates and reviews partner-scoped admin users with a dedicated setup flow based on existing users in the database." />
+          <div>
+            <h3 className="panel-title">Partner Admins</h3>
+            <div className="muted" style={{ marginTop: 8 }}>
+              Create partner-scoped admins with a capability preset. Select an existing user by email, then assign partner scope.
+            </div>
           </div>
 
-          <div>
-            <CardHelpTooltip text="Creates and reviews partner-scoped admin users along with their capability presets." />
-            <h3 className="panel-title">Partner Admin Capabilities</h3>
-            <div className="muted" style={{ marginTop: 8 }}>
-                Create partner-scoped admins with a capability preset. These admins receive partner scope, not global scope.
-              </div>
+          {createAdminMutation.error ? (
+            <div className="section-note section-note--danger">{mutationMessage(createAdminMutation.error)}</div>
+          ) : null}
+
+          <div className="field-row field-row--three">
+            <div>
+              <label className="field-label" htmlFor="reseller_admin_email">User Email</label>
+              <input
+                className="field"
+                id="reseller_admin_email"
+                list="reseller-admin-user-emails"
+                placeholder="Select an existing user by email"
+                value={adminForm.email}
+                onChange={(event) => {
+                  const nextEmail = event.target.value;
+                  const matchedUser = partnerAdminCandidates.find(
+                    (user) => user.profile?.email?.trim().toLowerCase() === nextEmail.trim().toLowerCase(),
+                  );
+                  if (matchedUser) {
+                    const profile = buildPartnerAdminProfile(matchedUser);
+                    setAdminForm({
+                      user_id_hash: profile.user_id_hash,
+                      display_name: profile.display_name,
+                      email: profile.email,
+                    });
+                  } else {
+                    setAdminForm((current) => ({
+                      ...current,
+                      user_id_hash: "",
+                      email: nextEmail,
+                    }));
+                  }
+                  setSuccessMessage(null);
+                }}
+              />
+              <datalist id="reseller-admin-user-emails">
+                {partnerAdminCandidates.map((user) => (
+                  <option key={user.user_id_hash} value={user.profile?.email ?? ""}>
+                    {buildUserLabel(user)}
+                  </option>
+                ))}
+              </datalist>
+              <div className="field-tip">Suggestions are pulled from users already in the database.</div>
             </div>
-
-            {createAdminMutation.error ? (
-              <div className="section-note section-note--danger">{mutationMessage(createAdminMutation.error)}</div>
-            ) : null}
-
-            <div className="field-row field-row--three">
-              <div>
-                <label className="field-label" htmlFor="reseller_admin_display_name">Display Name</label>
-                <input
-                  className="field"
-                  id="reseller_admin_display_name"
-                  value={adminForm.display_name}
-                  onChange={(event) => setAdminForm((current) => ({ ...current, display_name: event.target.value }))}
-                />
-              </div>
-              <div>
-                <label className="field-label" htmlFor="reseller_admin_email">Email</label>
-                <input
-                  className="field"
-                  id="reseller_admin_email"
-                  value={adminForm.email}
-                  onChange={(event) => setAdminForm((current) => ({ ...current, email: event.target.value }))}
-                />
-              </div>
+            <div>
+              <label className="field-label" htmlFor="reseller_admin_display_name">Display Name</label>
+              <input
+                className="field"
+                id="reseller_admin_display_name"
+                value={adminForm.display_name}
+                onChange={(event) => setAdminForm((current) => ({ ...current, display_name: event.target.value }))}
+              />
             </div>
-
             <div>
               <label className="field-label" htmlFor="reseller_admin_preset">Capability Preset</label>
               <select
@@ -843,45 +919,51 @@ export function ResellersPage() {
                 ))}
               </select>
             </div>
+          </div>
 
-            <button
-              className="primary-button"
-              disabled={(!adminForm.email.trim() && !adminForm.display_name.trim()) || !selectedReseller?.is_active}
-              onClick={() => createAdminMutation.mutate()}
-              type="button"
-            >
-              {createAdminMutation.isPending ? "Creating..." : "Create partner admin"}
-            </button>
-
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Admin</th>
-                    <th>Role</th>
-                    <th>Permissions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {resellerAdmins.length === 0 ? (
-                    <tr>
-                      <td colSpan={3}>No partner-scoped admins exist for this partner yet.</td>
-                    </tr>
-                  ) : (
-                    resellerAdmins.map((admin) => (
-                      <tr key={admin.id}>
-                        <td>
-                          <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
-                          <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
-                        </td>
-                        <td>{titleCase(admin.role)}</td>
-                        <td>{admin.permissions.length}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+          {!selectedPartnerAdminUser && adminForm.email.trim() ? (
+            <div className="section-note section-note--danger">
+              Select a user email from the database suggestions before creating a partner admin.
             </div>
+          ) : null}
+
+          <button
+            className="primary-button"
+            disabled={!selectedPartnerAdminUser || !selectedReseller?.is_active || createAdminMutation.isPending}
+            onClick={() => createAdminMutation.mutate()}
+            type="button"
+          >
+            {createAdminMutation.isPending ? "Creating..." : "Create partner admin"}
+          </button>
+
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Admin</th>
+                  <th>Role</th>
+                  <th>Permissions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resellerAdmins.length === 0 ? (
+                  <tr>
+                    <td colSpan={3}>No partner-scoped admins exist for this partner yet.</td>
+                  </tr>
+                ) : (
+                  resellerAdmins.map((admin) => (
+                    <tr key={admin.id}>
+                      <td>
+                        <strong>{admin.profile?.display_name ?? "Unnamed admin"}</strong>
+                        <div className="muted">{admin.profile?.email ?? "No email on file"}</div>
+                      </td>
+                      <td>{titleCase(admin.role)}</td>
+                      <td>{admin.permissions.length}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       ) : null}
