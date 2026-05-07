@@ -1417,6 +1417,85 @@ def get_snapshot_tenant_metrics(db: Session, tenant: Tenant) -> dict[str, object
     }
 
 
+def get_snapshot_tenant_metrics_map(db: Session, tenants: list[Tenant]) -> dict[str, dict[str, object]]:
+    if not tenants or not has_live_snapshot(db):
+        return {}
+
+    tenant_candidates: dict[str, list[str]] = {}
+    snapshot_ids: list[str] = []
+    for tenant in tenants:
+        candidates = auth_tenant_candidates(tenant)
+        tenant_candidates[tenant.id] = candidates
+        for candidate in candidates:
+            if candidate not in snapshot_ids:
+                snapshot_ids.append(candidate)
+
+    if not snapshot_ids:
+        return {}
+
+    has_conversations = table_exists(db, "conversations")
+    has_final_profile = table_exists(db, "final_profile")
+    profile_join = "left join final_profile fp on fp.user_id_hash = a.user_id_hash" if has_final_profile else ""
+    avg_structure_select = "avg(fp.structure) as avg_structure," if has_final_profile else "null as avg_structure,"
+    conversation_join = (
+        """
+        left join (
+          select user_id_hash, max(updated_at) as last_seen
+          from conversations
+          group by user_id_hash
+        ) c on c.user_id_hash = a.user_id_hash
+        """
+        if has_conversations
+        else ""
+    )
+    last_activity_expr = (
+        "max(coalesce(c.last_seen, a.last_login_at, a.updated_at, a.created_at))"
+        if has_conversations
+        else "max(coalesce(a.last_login_at, a.updated_at, a.created_at))"
+    )
+
+    rows = db.execute(
+        text(
+            f"""
+            select
+              a.tenant_id as snapshot_tenant_id,
+              count(*) as user_count,
+              sum(case when a.is_active then 1 else 0 end) as active_user_count,
+              {avg_structure_select}
+              {last_activity_expr} as last_activity_at
+            from auth_users a
+            {profile_join}
+            {conversation_join}
+            where a.tenant_id in :snapshot_ids
+            group by a.tenant_id
+            """
+        ).bindparams(bindparam("snapshot_ids", expanding=True)),
+        {"snapshot_ids": snapshot_ids},
+    ).mappings().all()
+
+    metrics_by_snapshot_id: dict[str, dict[str, object]] = {}
+    for row in rows:
+        utilization_pct = None
+        if row["avg_structure"] is not None:
+            utilization_pct = int(round(float(row["avg_structure"]) * 100))
+        metrics_by_snapshot_id[str(row["snapshot_tenant_id"])] = {
+            "user_count": int(row["user_count"] or 0),
+            "active_user_count": int(row["active_user_count"] or 0),
+            "utilization_pct": utilization_pct,
+            "last_activity_at": parse_datetime(row["last_activity_at"]),
+            "snapshot_tenant_id": str(row["snapshot_tenant_id"]),
+        }
+
+    metrics_by_tenant_id: dict[str, dict[str, object]] = {}
+    for tenant in tenants:
+        for candidate in tenant_candidates.get(tenant.id, []):
+            if candidate in metrics_by_snapshot_id:
+                metrics_by_tenant_id[tenant.id] = metrics_by_snapshot_id[candidate]
+                break
+
+    return metrics_by_tenant_id
+
+
 def get_snapshot_users(db: Session, tenant: Tenant | None = None) -> list[dict[str, object]]:
     snapshot_tenant_id = resolve_snapshot_tenant_id(db, tenant)
     if tenant is not None and snapshot_tenant_id is None:

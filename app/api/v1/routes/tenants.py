@@ -50,6 +50,7 @@ from app.services import (
     get_tenant_or_404,
     get_snapshot_tenant_ids,
     get_snapshot_tenant_metrics,
+    get_snapshot_tenant_metrics_map,
     inactivate_tenant_state,
     mask_api_key,
     refresh_onboarding_state,
@@ -155,9 +156,10 @@ def to_portal_schema(tenant: Tenant) -> TenantPortalConfigSchema:
     return TenantPortalConfigSchema.model_validate(portal_config, from_attributes=True)
 
 
-def to_summary(db: Session, tenant: Tenant) -> TenantSummary:
+def to_summary(db: Session, tenant: Tenant, snapshot_metrics: dict[str, object] | None = None) -> TenantSummary:
     profile = TenantProfileSchema.model_validate(tenant.profile, from_attributes=True) if tenant.profile else None
-    snapshot_metrics = get_snapshot_tenant_metrics(db, tenant)
+    if snapshot_metrics is None:
+        snapshot_metrics = get_snapshot_tenant_metrics(db, tenant)
     if profile and snapshot_metrics:
         profile.last_activity_at = snapshot_metrics["last_activity_at"]  # type: ignore[assignment]
         profile.utilization_pct = snapshot_metrics["utilization_pct"]  # type: ignore[assignment]
@@ -285,7 +287,7 @@ def list_tenants(
     if reseller_partner_id:
         query = query.where(Tenant.reseller_partner_id == reseller_partner_id)
 
-    items = []
+    scoped_tenants: list[Tenant] = []
     mapped_snapshot_ids: set[str] = set()
     for tenant in db.scalars(query):
         try:
@@ -294,11 +296,14 @@ def list_tenants(
             if exc.status_code == status.HTTP_403_FORBIDDEN:
                 continue
             raise
-        items.append(to_summary(db, tenant))
+        scoped_tenants.append(tenant)
         if tenant.external_customer_id:
             mapped_snapshot_ids.add(tenant.external_customer_id)
         mapped_snapshot_ids.add(tenant.id)
         mapped_snapshot_ids.add(tenant.tenant_key)
+
+    snapshot_metrics_by_tenant_id = get_snapshot_tenant_metrics_map(db, scoped_tenants)
+    items = [to_summary(db, tenant, snapshot_metrics_by_tenant_id.get(tenant.id)) for tenant in scoped_tenants]
 
     if principal.role in {"super_admin", "support_admin"}:
         for snapshot_tenant_id in get_snapshot_tenant_ids(db):
