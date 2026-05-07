@@ -1,5 +1,7 @@
 import { Shield, BarChart3, Building2, Cog, FileDown, Gauge, Rocket, Server, Tags, Users, UserCog, Layers3, Handshake } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../../app/providers/AuthProvider";
+import { canViewRestrictedAdminScreens } from "../../lib/adminVisibility";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: Gauge },
@@ -10,17 +12,20 @@ const navItems = [
   { to: "/admins", label: "Admins", icon: UserCog },
   { to: "/reports", label: "Reporting", icon: BarChart3 },
   { to: "/exports", label: "Exports", icon: FileDown },
-  { to: "/resellers", label: "Partners", icon: Handshake },
-  { to: "/operations", label: "Operations", icon: Server },
-  { to: "/tiers", label: "Service Tiers", icon: Tags },
-  { to: "/settings", label: "Settings", icon: Cog },
+  { to: "/resellers", label: "Partners", icon: Handshake, restricted: true },
+  { to: "/operations", label: "Operations", icon: Server, restricted: true },
+  { to: "/tiers", label: "Service Tiers", icon: Tags, restricted: true },
+  { to: "/settings", label: "Settings", icon: Cog, restricted: true },
 ];
 
 export function SideNav() {
+  const { session } = useAuth();
+  const canViewRestricted = canViewRestrictedAdminScreens(session?.principal);
+
   return (
     <aside className="sidebar">
       <nav className="sidebar__nav">
-        {navItems.map((item) => {
+        {navItems.filter((item) => !item.restricted || canViewRestricted).map((item) => {
           const Icon = item.icon;
           return (
             <NavLink

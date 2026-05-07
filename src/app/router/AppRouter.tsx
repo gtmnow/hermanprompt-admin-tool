@@ -27,6 +27,7 @@ import { ServiceTiersPage } from "../../pages/settings/ServiceTiersPage";
 import { SettingsPage } from "../../pages/settings/SettingsPage";
 import { UserImportPage } from "../../pages/users/UserImportPage";
 import { UsersPage } from "../../pages/users/UsersPage";
+import { canViewRestrictedAdminScreens } from "../../lib/adminVisibility";
 
 function AuthLoadingScreen() {
   return (
@@ -62,7 +63,7 @@ function UnauthenticatedScreen({ loginUrl, errorMessage }: { loginUrl: string; e
 }
 
 export function AppRouter() {
-  const { errorMessage, loginUrl, status } = useAuth();
+  const { errorMessage, loginUrl, session, status } = useAuth();
 
   if (status === "loading") {
     return <AuthLoadingScreen />;
@@ -71,6 +72,8 @@ export function AppRouter() {
   if (status !== "authenticated") {
     return <UnauthenticatedScreen loginUrl={loginUrl} errorMessage={errorMessage} />;
   }
+
+  const canViewRestricted = canViewRestrictedAdminScreens(session?.principal);
 
   return (
     <BrowserRouter>
@@ -81,7 +84,7 @@ export function AppRouter() {
           <Route path="/activation" element={<ActivationLandingPage />} />
           <Route path="/activation/new" element={<ActivationWizardPage />} />
           <Route path="/activation/:tenantId" element={<ActivationWizardPage />} />
-          <Route path="/resellers" element={<ResellersPage />} />
+          <Route path="/resellers" element={canViewRestricted ? <ResellersPage /> : <Navigate to="/dashboard" replace />} />
           <Route path="/orgs" element={<OrganizationsPage />} />
           <Route path="/orgs/:tenantId" element={<OrganizationDetailPage />}>
             <Route path="users" element={<OrganizationUsersTab />} />
@@ -98,10 +101,10 @@ export function AppRouter() {
           <Route path="/groups" element={<GroupsPage />} />
           <Route path="/admins" element={<AdminsPage />} />
           <Route path="/reports" element={<ReportsPage />} />
-          <Route path="/operations" element={<OperationsPage />} />
+          <Route path="/operations" element={canViewRestricted ? <OperationsPage /> : <Navigate to="/dashboard" replace />} />
           <Route path="/exports" element={<ExportsPage />} />
-          <Route path="/tiers" element={<ServiceTiersPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/tiers" element={canViewRestricted ? <ServiceTiersPage /> : <Navigate to="/dashboard" replace />} />
+          <Route path="/settings" element={canViewRestricted ? <SettingsPage /> : <Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </AppShell>
