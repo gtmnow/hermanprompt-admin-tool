@@ -271,6 +271,7 @@ export function UsersPage() {
   const invalidateUserQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["users-page-users"] }),
+      queryClient.invalidateQueries({ queryKey: ["users-page-user-memberships"] }),
       queryClient.invalidateQueries({ queryKey: ["users-page-groups"] }),
       queryClient.invalidateQueries({ queryKey: ["users-page-create-tenant-users"] }),
       queryClient.invalidateQueries({ queryKey: ["tenant-users"] }),
@@ -360,7 +361,11 @@ export function UsersPage() {
         throw new Error("This user does not currently have an admin role assignment.");
       }
       if (!userEditForm.admin_role) {
-        throw new Error("Select an admin role before saving.");
+        return tenantApi.updateAdmin(activeSelectedUser.admin_role.admin_id, {
+          is_active: false,
+          permissions: [],
+          scopes: [],
+        });
       }
       return tenantApi.updateAdmin(activeSelectedUser.admin_role.admin_id, {
         role: userEditForm.admin_role,
@@ -368,26 +373,30 @@ export function UsersPage() {
     },
     onSuccess: async ({ resource }) => {
       await invalidateUserQueries();
+      const clearedAdminAccess = !resource.is_active || resource.permissions.length === 0 || resource.scopes.length === 0;
       setSelectedUser((current) =>
         current
           ? {
               ...current,
-              admin_role: {
-                ...(current.admin_role ?? {
-                  admin_id: resource.id,
-                  is_active: resource.is_active,
-                  permissions: [],
-                  scope_types: [],
-                }),
-                admin_id: resource.id,
-                role: resource.role,
-                is_active: resource.is_active,
-                permissions: resource.permissions.map((permission) => permission.permission_key),
-                scope_types: resource.scopes.map((scope) => scope.scope_type),
-              },
+              admin_role: clearedAdminAccess
+                ? null
+                : {
+                    ...(current.admin_role ?? {
+                      admin_id: resource.id,
+                      is_active: resource.is_active,
+                      permissions: [],
+                      scope_types: [],
+                    }),
+                    admin_id: resource.id,
+                    role: resource.role,
+                    is_active: resource.is_active,
+                    permissions: resource.permissions.map((permission) => permission.permission_key),
+                    scope_types: resource.scopes.map((scope) => scope.scope_type),
+                  },
             }
           : current,
       );
+      setUserEditForm((current) => ({ ...current, admin_role: clearedAdminAccess ? "" : resource.role }));
     },
   });
 
@@ -974,6 +983,7 @@ export function UsersPage() {
                               setUserEditForm((current) => ({ ...current, admin_role: event.target.value }))
                             }
                           >
+                            <option value="">None</option>
                             {adminRoleOptions.map((role) => (
                               <option key={role} value={role}>
                                 {titleCase(role)}
@@ -986,11 +996,14 @@ export function UsersPage() {
                           <div className="dialog-actions">
                             <button
                               className="secondary-button"
-                              disabled={updateAdminRoleMutation.isPending || !userEditForm.admin_role}
                               onClick={() => updateAdminRoleMutation.mutate()}
                               type="button"
                             >
-                              {updateAdminRoleMutation.isPending ? "Saving..." : "Save Admin Role"}
+                              {updateAdminRoleMutation.isPending
+                                ? "Saving..."
+                                : userEditForm.admin_role
+                                  ? "Save Admin Role"
+                                  : "Remove Admin Access"}
                             </button>
                           </div>
                         </div>

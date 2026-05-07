@@ -231,6 +231,8 @@ def build_admin_role_summary(db: Session, user_id_hash: str) -> UserAdminRoleSum
         for item in db.scalars(select(AdminPermission).where(AdminPermission.admin_user_id == admin.id))
     ]
     scopes = list(db.scalars(select(AdminScope).where(AdminScope.admin_user_id == admin.id)))
+    if not admin.is_active or not permissions or not scopes:
+        return None
     return UserAdminRoleSummary(
         admin_id=admin.id,
         role=admin.role,
@@ -274,6 +276,9 @@ def build_admin_role_lookup(db: Session, user_id_hashes: list[str]) -> dict[str,
             scope_types=sorted(scope_types_by_admin_id.get(admin.id, set())),
         )
         for admin in admins
+        if admin.is_active
+        and permissions_by_admin_id.get(admin.id, [])
+        and scope_types_by_admin_id.get(admin.id, set())
     }
 
 
