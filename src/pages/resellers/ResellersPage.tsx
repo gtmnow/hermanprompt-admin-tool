@@ -361,34 +361,7 @@ export function ResellersPage() {
     },
   });
 
-  if (
-    resellersQuery.isLoading ||
-    tenantsQuery.isLoading ||
-    adminsQuery.isLoading ||
-    usersQuery.isLoading ||
-    onboardingQuery.isLoading ||
-    platformManagedLlmsQuery.isLoading ||
-    resellerTiersQuery.isLoading ||
-    organizationTiersQuery.isLoading
-  ) {
-    return <LoadingBlock label="Loading partner workspace..." />;
-  }
-
-  const resellers = resellersQuery.data?.items ?? [];
-  const tenants = tenantsQuery.data?.items ?? [];
-  const admins = adminsQuery.data?.items ?? [];
   const users = usersQuery.data?.items ?? [];
-  const onboarding = onboardingQuery.data?.items ?? [];
-  const platformManagedLlms = platformManagedLlmsQuery.data?.items ?? [];
-  const resellerTiers = resellerTiersQuery.data?.items ?? [];
-  const organizationTiers = organizationTiersQuery.data?.items ?? [];
-  const selectedReseller = resellers.find((item) => item.id === selectedResellerId) ?? null;
-  const assignedTenants = tenants.filter((item) => item.tenant.reseller_partner_id === selectedResellerId);
-  const unassignedTenants = tenants.filter((item) => !item.tenant.reseller_partner_id);
-  const transferCandidates = tenants.filter((item) => item.tenant.reseller_partner_id && item.tenant.reseller_partner_id !== selectedResellerId);
-  const resellerAdmins = admins.filter((admin) =>
-    admin.scopes.some((scope) => scope.scope_type === "reseller" && scope.reseller_partner_id === selectedResellerId),
-  );
   const partnerAdminCandidates = useMemo(() => {
     const seenEmails = new Set<string>();
     return [...users]
@@ -408,6 +381,34 @@ export function ResellersPage() {
         (user) => user.profile?.email?.trim().toLowerCase() === adminForm.email.trim().toLowerCase(),
       ) ?? null,
     [adminForm.email, partnerAdminCandidates],
+  );
+
+  if (
+    resellersQuery.isLoading ||
+    tenantsQuery.isLoading ||
+    adminsQuery.isLoading ||
+    usersQuery.isLoading ||
+    onboardingQuery.isLoading ||
+    platformManagedLlmsQuery.isLoading ||
+    resellerTiersQuery.isLoading ||
+    organizationTiersQuery.isLoading
+  ) {
+    return <LoadingBlock label="Loading partner workspace..." />;
+  }
+
+  const resellers = resellersQuery.data?.items ?? [];
+  const tenants = tenantsQuery.data?.items ?? [];
+  const admins = adminsQuery.data?.items ?? [];
+  const onboarding = onboardingQuery.data?.items ?? [];
+  const platformManagedLlms = platformManagedLlmsQuery.data?.items ?? [];
+  const resellerTiers = resellerTiersQuery.data?.items ?? [];
+  const organizationTiers = organizationTiersQuery.data?.items ?? [];
+  const selectedReseller = resellers.find((item) => item.id === selectedResellerId) ?? null;
+  const assignedTenants = tenants.filter((item) => item.tenant.reseller_partner_id === selectedResellerId);
+  const unassignedTenants = tenants.filter((item) => !item.tenant.reseller_partner_id);
+  const transferCandidates = tenants.filter((item) => item.tenant.reseller_partner_id && item.tenant.reseller_partner_id !== selectedResellerId);
+  const resellerAdmins = admins.filter((admin) =>
+    admin.scopes.some((scope) => scope.scope_type === "reseller" && scope.reseller_partner_id === selectedResellerId),
   );
   const readyTenants = assignedTenants.filter((item) =>
     onboarding.some((status) => status.tenant_id === item.tenant.id && (status.onboarding_status === "ready" || status.onboarding_status === "live")),
